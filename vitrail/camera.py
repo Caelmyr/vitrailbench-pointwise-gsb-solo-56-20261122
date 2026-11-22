@@ -172,12 +172,15 @@ def apply_matrix(matrix, points):
         return aff[..., :2] / aff[..., 2:]
 
 
-@dataclass(frozen=True)
+@dataclass
 class Alignment:
     title: str
     corners: tuple
     model: str
     matrix: np.ndarray
+    local: object = None
+    warp: object = None
+    inverse_warp: object = None
 
     @classmethod
     def identity(cls):
@@ -186,15 +189,22 @@ class Alignment:
     @classmethod
     def parse(cls, raw):
         body = object_data(raw, "Alignment")
-        keys(body, "title", "corners", "model")
+        keys(body, "title", "corners", "model", "local", "error_rms", "matrix")
         title = label(body.get("title", "Alignment"), "Alignment name")
         entries = body.get("corners")
         if not isinstance(entries, (tuple, list)) or len(entries) != 4:
             raise Problem("Enter four corners from upper left, clockwise.")
         corners = tuple(pair(value, "Corner", -0.15, 1.15) for value in entries)
         model = body.get("model", "projective")
-        if model not in ("projective", "affine"):
-            raise Problem("Alignment model must be projective or affine.")
+        if model not in ("projective", "affine", "local"):
+            raise Problem("Alignment model must be projective, affine or local.")
+        if model == "local":
+            local = object_data(body.get("local"), "Local measured-line fit")
+            keys(local, "segments", "tolerance_mm", "smoothing", "panel_mm", "note")
+            if not isinstance(local.get("segments"), list) or not local["segments"]:
+                raise Problem("A local fit needs at least one measured line.")
+            matrix = _transformation(corners, "projective")
+            return cls(title, corners, "local", matrix, local, None)
         xy = np.array(corners)
         edges = np.roll(xy, -1, axis=0) - xy
         next_edges = np.roll(edges, -1, axis=0)
@@ -205,19 +215,33 @@ class Alignment:
         corners_z = np.array(CORNERS) @ matrix[2, :2] + matrix[2, 2]
         if min(corners_z) < 0.1 or np.linalg.cond(matrix) > 120:
             raise Problem("The proposed alignment is too compressed or unstable.")
-        return cls(title, corners, model, matrix)
+        return cls(title, corners, model, matrix, None, None)
 
     def public(self):
         predicted = apply_matrix(self.matrix, CORNERS)
-        return dict(title=self.title, corners=[list(p) for p in self.corners], model=self.model,
+        data = dict(title=self.title, corners=[list(p) for p in self.corners], model=self.model,
                     error_rms=rounded(np.sqrt(np.mean((predicted - self.corners) ** 2))),
                     matrix=np.round(self.matrix, 8).tolist())
+        if self.local is not None:
+            data["local"] = self.local
+        return data
 
     def to_camera(self, panel_positions):
-        return apply_matrix(self.matrix, panel_positions)
+        if self.warp is None:
+            return apply_matrix(self.matrix, panel_positions)
+        return _local_camera(self, panel_positions)
 
     def to_panel(self, camera_positions):
-        return apply_matrix(np.linalg.inv(self.matrix), camera_positions)
+        base_panel = apply_matrix(np.linalg.inv(self.matrix), camera_positions)
+        if self.warp is None or self.inverse_warp is None:
+            return base_panel
+        return self.inverse_warp(np.clip(base_panel, 0, 1))
+
+
+def _local_camera(alignment, panel_positions):
+    points = np.asarray(panel_positions, dtype=np.float64)
+    corrected = alignment.warp(np.clip(points, 0, 1))
+    return apply_matrix(alignment.matrix, corrected)
 
 
 def sample_rgb(camera, grid, alpha_floor=0.985):

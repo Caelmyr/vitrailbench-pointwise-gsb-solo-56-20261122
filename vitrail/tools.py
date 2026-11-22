@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from .calibration import calibration_grid, camera_sampling_section, ruler_audit
+from .localfit import local_fit
 from .correspondence import pair_control, pattern_spacing, registered_edges
 from .inscription import frosted_haze, inscription_survey
 from .leads import lead_network, solder_joints
@@ -140,6 +141,10 @@ TOOLS=(
     Tool("rulers","Measured length cross-check","Camera calibration",1,(
         number("tolerance_mm","Length tolerance (mm)",1.5),),ruler_audit,
         "Read direction and measured physical span in the aligned panel plane."),
+    Tool("local-fit","Local measured-line registration","Camera calibration",1,(
+        number("tolerance_mm","Length tolerance (mm)",1.5),
+        number("smoothing","Smoothing strength",.35,.05)),local_fit,
+        "Correct a squeezed interior area from measured lines while keeping the four-corner frame fixed."),
     Tool("sampling-section","Camera sampling section","Camera calibration",1,(
         drawn("from","Start",[.15,.5]),
         drawn("to","End",[.85,.5]),

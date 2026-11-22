@@ -6,6 +6,7 @@ import re
 import sys
 from urllib.parse import quote
 
+import numpy as np
 from flask import Flask, Response, request, send_file, send_from_directory
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
 
@@ -173,7 +174,10 @@ def register_library(app,library,executor):
             photo=library.photo(cap)
             if photo["revision"]!=revision:
                 raise Problem("The capture was changed on another screen.",409)
-            audit=_try_alignment(library,photo,proposed,executor)
+            if proposed.model=="local":
+                audit=_try_local_alignment(library,photo,proposed)
+            else:
+                audit=_try_alignment(library,photo,proposed,executor)
             return {"alignment":proposed.public(),**audit}
         return {"alignment":library.add_alignment(cap,revision,proposed)},201
 
@@ -201,6 +205,42 @@ def _try_alignment(library,photo,proposed,executor):
         code,usable=sample_rgb(camera,points)
         asset=png("aligned-camera",mask_overlay(srgb_to_linear(code),[],usable))
     return {"image":asset.presentation(),"coverage":rounded(usable.mean()),"grid":dims.public()}
+
+
+def _try_local_alignment(library,photo,proposed):
+    from .camera import PhysicalGrid
+    from .localfit import LocalLine, fit_displacement, line_reports
+    from .contracts import rounded
+    panel=library.panel_summary(photo["panel_id"])["panel"]
+    local=proposed.local
+    lines=[LocalLine.parse(seg,i) for i,seg in enumerate(local["segments"],1)]
+    missing=[line.title for line in lines if line.measured_mm is None]
+    if missing:
+        raise Problem(f"Fill the measured millimetres for {', '.join(missing)} or remove the line.")
+    warp,inverse_warp,dx,dy,_=fit_displacement(lines,panel["width_mm"],panel["height_mm"],local.get("smoothing",.35))
+    tolerance=local.get("tolerance_mm",1.5)
+    proposed.warp=warp
+    proposed.inverse_warp=inverse_warp
+    reports=line_reports(lines,warp,panel["width_mm"],panel["height_mm"],tolerance)
+    _,contents=library.photo_bytes(photo["id"])
+    camera=open_camera(contents)
+    dims=PhysicalGrid.from_panel(panel,[camera],640)
+    points=proposed.to_camera(dims.grid())
+    from .camera import sample_rgb, srgb_to_linear
+    code,usable=sample_rgb(camera,points)
+    asset=png("aligned-camera",mask_overlay(srgb_to_linear(code),[],usable))
+    mm_shift=np.sqrt(dx**2+dy**2)
+    return {"image":asset.presentation(),"coverage":rounded(usable.mean()),"grid":dims.public(),
+            "lines":reports,
+            "summary":dict(line_count=len(reports),
+                           drivers=sum(row["used_in_fit"] for row in reports),
+                           baseline_disagreements=sum(row["baseline_status"]=="disagreement" for row in reports),
+                           resolved=sum(row["baseline_status"]=="disagreement" and row["status"]=="within" for row in reports),
+                           frame_conflicts=sum(row["status"]=="frame-conflict" for row in reports),
+                           residual_disagreements=sum(row["status"]=="disagreement" for row in reports),
+                           unseen=sum(row["status"]=="unseen" for row in reports),
+                           max_shift_mm=rounded(float(mm_shift.max())),
+                           median_shift_mm=rounded(float(np.median(mm_shift[1:-1,1:-1]))))}
 
 
 def register_surveys(app,library):

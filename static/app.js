@@ -6,7 +6,8 @@ const state = {
     panels:[], samples:[], tools:[], panel:null, photos:[], reports:[], surveys:[], activity:[],
     chosen:null, selection:[], tab:"inspect", tool:"transmission", options:{}, region:[0,0,1,1],
     draft:null, saved:null, preview:null, pictured:null, draw:null, alignment:[], alignTrial:null,
-    sourceView:null, survey:null, busy:false, loadingPanel:null
+    sourceView:null, survey:null, busy:false, loadingPanel:null,
+    alignMode:"corners", localLines:[], localTrial:null, localParams:{tolerance_mm:1.5,smoothing:.35}
 };
 const api = () => "/api/panels/"+state.panel.id;
 const capture = () => state.photos.find(photo => photo.id === state.chosen);
@@ -106,12 +107,29 @@ function photosRail() {
 }
 function overlay() {
     let points=state.draw?.cameraPoints||state.draw?.points||[];
-    if(state.tab==="align") points=state.alignment;
+    if(state.tab==="align"&&state.alignMode==="corners"&&!state.draw) points=state.alignment;
     let marks="";
     if(points.length) marks='<polyline points="'+points.map(([x,y])=>x*1000+","+y*1000).join(" ")+'" fill="none" stroke="#f3d376" stroke-width="2"/>'+points.map(([x,y])=>'<circle cx="'+x*1000+'" cy="'+y*1000+'" r="6" fill="#f3d376" stroke="#323b3d" stroke-width="1"/>').join("");
     if(state.draw?.shape==="box" && points.length===2) {
         const [p,q]=points;
         marks+='<rect x="'+Math.min(p[0],q[0])*1000+'" y="'+Math.min(p[1],q[1])*1000+'" width="'+Math.abs(p[0]-q[0])*1000+'" height="'+Math.abs(p[1]-q[1])*1000+'" fill="none" stroke="#f3d376" stroke-width="2"/>';
+    }
+    if(state.tab==="align"&&state.alignMode==="local"&&!state.draw) {
+        const statusOf=i=>state.localTrial?.lines?.[i]?.status;
+        const toCamera=pt=>{
+            const m=state.activeMatrix;
+            if(!m) return pt;
+            const [x,y]=pt,[a,b,c]=m;
+            const den=c[0]*x+c[1]*y+c[2];
+            return [(a[0]*x+a[1]*y+a[2])/den,(b[0]*x+b[1]*y+b[2])/den];
+        };
+        marks+=state.localLines.map((line,i)=>{
+            const status=statusOf(i);
+            const stroke=status==="within"||status==="frame-ok"?"#7fd8ad":status==="unseen"?"#f1c863":status?"#f4816e":"#7fb6e8";
+            const pts=[toCamera(line.from),toCamera(line.to)].map(p=>p[0]*1000+","+p[1]*1000).join(" ");
+            return '<polyline points="'+pts+'" fill="none" stroke="'+stroke+'" stroke-width="2.5"/>'+
+                [line.from,line.to].map(p=>{const q=toCamera(p);return '<circle cx="'+q[0]*1000+'" cy="'+q[1]*1000+'" r="6" fill="'+stroke+'" stroke="#323b3d" stroke-width="1"/>';}).join("");
+        }).join("");
     }
     return '<svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">'+marks+'</svg>';
 }
@@ -120,8 +138,8 @@ function stage() {
     const item=result?.assets.find(part=>part.key===state.pictured&&part.mime==="image/png");
     let natural=state.chosen?"/api/photos/"+state.chosen+"/view/preview":"";
     let picture=state.sourceView||state.preview||dataSource(item)||natural;
-    if(state.draw||state.tab==="align") picture=state.alignTrial&&state.preview?state.preview:natural;
-    if(state.tab==="align"&&state.alignTrial) picture=state.preview;
+    if(state.draw||state.tab==="align") picture=(state.alignTrial||state.localTrial)&&state.preview?state.preview:natural;
+    if(state.tab==="align"&&(state.alignTrial||state.localTrial)) picture=state.preview;
     const labelText=picture===natural?"Camera preview":state.tab==="align"?"Aligned panel preview":item?.key?.replaceAll("-"," ")||"Registered panel preview";
     return '<section class="image-area" aria-label="Panel image"><div class="image-bar"><h2>'+text(labelText)+'</h2><div class="row">'+b("Camera","show-camera","","tight")+b("Panel plane","panel-plane","","tight")+'</div></div>'+
         (state.draw?'<p class="notice">'+text(state.draw.prompt)+" "+state.draw.points.length+" point(s). "+b("Use marks","finish-draw","","tight")+b("Cancel","cancel-draw","","tight")+'</p>':"")+
@@ -163,15 +181,53 @@ function alignPane() {
     if(!current) return '<p>Select a camera capture.</p>';
     const revisions=state.registration?.revisions||[];
     const params=state.alignParams||{title:"Panel outline",model:"projective"};
-    return '<h2>Outline alignment</h2><p class="quiet">Click all four camera corners clockwise from the upper left.</p>'+
+    const corner='<h2>Outline alignment</h2><p class="quiet">Click all four camera corners clockwise from the upper left. The outer frame and its measured edge lengths stay on this registration.</p>'+
         '<p>'+state.alignment.length+' / 4 corners</p><div class="row">'+b("Clear corners","clear-align","","tight")+'</div>'+
         '<form data-form="align">'+input("Alignment name","title",params.title)+
         selection("Projection","model",[["projective","Perspective"],["affine","Affine"]],params.model)+
         '<div class="row"><button class="warm" '+(state.alignment.length!==4?"disabled":"")+' type="submit">Preview alignment</button>'+
         (state.alignTrial?b("Use alignment","retain-align","","warm"):"")+'</div></form>'+
-        (state.alignTrial?metrics({coverage:state.alignTrial.coverage,error:state.alignTrial.alignment.error_rms}):"")+
+        (state.alignTrial?metrics({coverage:state.alignTrial.coverage,error:state.alignTrial.alignment.error_rms}):"");
+    const local=localAlignPane();
+    return '<h2>Registration</h2><div class="tabs" role="tablist">'+
+        '<button role="tab" aria-selected="'+(state.alignMode==="corners")+'" data-act="align-mode" data-key="corners">Four corners</button>'+
+        '<button role="tab" aria-selected="'+(state.alignMode==="local")+'" data-act="align-mode" data-key="local">Local measured lines</button></div>'+
+        (state.alignMode==="corners"?corner:local)+
         '<h3>Saved alignments</h3><div class="align-list">'+b("Whole image","activate-align","")+
-        revisions.map(item=>b(item.data.title+(item.id===state.registration.active?" · Active":""),"activate-align",item.id)).join("")+"</div>";
+        revisions.map(item=>b(item.data.title+(item.data.model==="local"?" · local":"")+(item.id===state.registration.active?" · Active":""),"activate-align",item.id)).join("")+"</div>";
+}
+const LOCAL_STATUS_HINT={
+    "within":"Reading matched after the local correction",
+    "frame-ok":"Frame edge anchor agrees with the four-corner registration",
+    "disagreement":"The ruler reading still differs beyond tolerance after the fit",
+    "frame-conflict":"A frame-edge reading conflicts with the kept four-corner frame and was excluded",
+    "unseen":"An endpoint falls outside captured support; the reading cannot be checked"
+};
+function localAlignPane() {
+    const lines=state.localLines;
+    const trial=state.localTrial;
+    const statusRows=trial?trial.lines.map((row,i)=>{
+        const color={within:"#7fd8ad","frame-ok":"#60be9e",disagreement:"#f4816e","frame-conflict":"#e05448",unseen:"#f1c863"}[row.status];
+        return '<div class="scoped"><strong style="color:'+color+'">'+text(row.name)+' · '+text(row.status)+'</strong>'+
+            '<p class="quiet">'+text(LOCAL_STATUS_HINT[row.status])+'</p>'+
+            '<p class="quiet">ruler '+text(row.measured_mm)+' mm · four-corner '+text(row.baseline_mm)+' mm · corrected '+
+            text(row.corrected_mm)+' mm (residual '+text(row.corrected_difference_mm)+' mm)</p></div>';
+    }).join(""):"";
+    const editor=lines.length?'<div class="mark-grid">'+lines.map((line,i)=>
+        '<div class="scoped"><strong>'+text(line.name)+(line.on_frame?' · frame anchor':' · interior')+'</strong>'+
+        '<p class="quiet">'+JSON.stringify(line.from)+' → '+JSON.stringify(line.to)+'</p>'+
+        '<div class="row"><label class="fieldgrid">measured mm<input type="number" step="0.01" data-line-mm="'+i+'" value="'+text(line.measured_mm??"")+'"></label>'+
+        b("Remove","remove-local-line",i,"tight")+'</div></div>').join("")+'</div>':
+        '<p class="quiet">Draw a measured line across the squeezed middle panes, then type the millimetres from your ruler. Lines on the outer frame only anchor the border and never move it.</p>';
+    return '<p class="quiet">Correct a locally squeezed area while keeping the four-corner frame fixed. Fill every measured value; blank or conflicting readings are flagged separately.</p>'+
+        '<div class="row">'+b("Draw interior line","add-local-line","","warm")+b("Draw frame anchor","add-frame-line","","tight")+'</div>'+
+        editor+
+        '<form data-form="local-fit">'+input("Fit name","title","Local measured lines")+
+        input("Length tolerance (mm)","tolerance_mm",state.localParams.tolerance_mm,"number","step=.05")+
+        input("Smoothing strength (0–1)","smoothing",state.localParams.smoothing,"number","step=.05")+
+        '<div class="row"><button class="warm" type="submit" '+(lines.length?"":"disabled")+'>Preview local fit</button>'+
+        (trial?b("Use this local fit","retain-local","","warm"):"")+'</div></form>'+
+        (trial?metrics(trial.summary):"")+(statusRows?'<div class="scroll">'+statusRows+'</div>':"");
 }
 function recordPane() {
     return '<h2>Retained inspections</h2>'+(state.reports.length?a("Inspection index PDF",api()+"/inspection-index"):"")+'<div class="reports">'+(state.reports.length?state.reports.map(item=>'<button class="report-row" data-act="record" data-key="'+item.id+'"><strong>'+text(item.name)+'</strong><span>'+text(item.review.state)+'</span></button>').join(""):'<p class="quiet">Retain a preview to keep its readings.</p>')+'</div>'+resultBox()+detail(state.activity,"Activity");
@@ -228,6 +284,9 @@ async function run() {
 async function alignOpen() {
     state.tab="align"; state.alignTrial=null; state.preview=null;
     state.alignment=[]; state.alignParams={title:"Panel outline",model:"projective"};
+    if(state.alignMode===undefined) state.alignMode="corners";
+    if(!Array.isArray(state.localLines)) state.localLines=[];
+    state.localTrial=null;
     state.registration=capture()?await rpc("/api/photos/"+state.chosen+"/alignments"):null;
     render();
 }
@@ -244,11 +303,19 @@ function captureFields(meta={}) {
         input("Black code","black_code",meta.black_code??0,"number","step=.001")+'</div>'+
         input("Lighting label","illuminant",meta.illuminant||"")+notes("Notes","note",meta.note||"");
 }
+function startLocalLine(onFrame) {
+    if(!capture()?.active_alignment) {
+        msg("Save a four-corner alignment first so drawn marks map to the panel plane.",true);
+        return;
+    }
+    drawing(onFrame?"frame-line":"local-line");
+}
 function drawing(key,inputType=null) {
     if(state.tab==="inspect") keepPresets();
-    const current=inputType || (key==="path"?"line":key==="boundary"?"polygon":["region","reference","background","color_reference","middle"].includes(key)?"box":"point");
-    const rules={point:"Click a location on the camera image.",line:"Click a line or polyline on the camera image.",box:"Click two opposite corners.",polygon:"Click successive polygon vertices."};
-    state.draw={key,shape:current,prompt:rules[current],points:[],cameraPoints:[]}; state.sourceView=null;
+    const localKeys=new Set(["local-line","frame-line"]);
+    const current=localKeys.has(key)?"line":(inputType || (key==="path"?"line":key==="boundary"?"polygon":["region","reference","background","color_reference","middle"].includes(key)?"box":"point"));
+    const rules={point:"Click a location on the camera image.",line:"Click the two ends of the measured line.",box:"Click two opposite corners.",polygon:"Click successive polygon vertices."};
+    state.draw={key,shape:current,prompt:rules[current]||rules.line,points:[],cameraPoints:[]}; state.sourceView=null;
     render();
 }
 function finishDraw() {
@@ -262,6 +329,11 @@ function finishDraw() {
     else if(selected.key==="new-survey-mark") {
         const mark={...selected.mark,points:selected.shape==="point"?[place]:place};
         state.survey.geometry.marks.push(mark);
+    } else if(selected.key==="local-line"||selected.key==="frame-line") {
+        const onFrame=selected.key==="frame-line";
+        state.localLines.push({name:(onFrame?"Frame anchor ":"Measured line ")+(state.localLines.length+1),
+            from:place[0],to:place[1],measured_mm:null,on_frame:onFrame});
+        state.localTrial=null;
     } else state.options[selected.key]=place;
     state.draw=null;
     render();
@@ -273,7 +345,8 @@ function pointEvent(event) {
     if(!box.width||!box.height) return true;
     let point=[(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height].map(v=>Number(Math.max(0,Math.min(1,v)).toFixed(6)));
     const cameraPoint=point;
-    if (state.draw && state.tab !== "align" && capture()?.active_alignment) {
+    const localDrawing=state.draw&&(state.draw.key==="local-line"||state.draw.key==="frame-line");
+    if (state.draw && (state.tab !== "align" || localDrawing) && capture()?.active_alignment) {
         const m=state.activeMatrix;
         if (!m) throw Error("Load the panel plane first or reactivate its alignment.");
         const [a,b,c]=m, [x,y]=point;
@@ -285,10 +358,12 @@ function pointEvent(event) {
         if (point.some(v=>v<0||v>1)) throw Error("That point is outside the aligned panel.");
     }
     if(state.draw) {
-        const limit={point:1,box:2,line:90,polygon:120}[state.draw.shape];
+        const twoEnd=state.draw.key==="local-line"||state.draw.key==="frame-line";
+        const limit=twoEnd?2:{point:1,box:2,line:90,polygon:120}[state.draw.shape];
         if(state.draw.points.length>=limit) {state.draw.points=[];state.draw.cameraPoints=[];}
         state.draw.points.push(point);
         state.draw.cameraPoints.push(cameraPoint);
+        if(twoEnd&&state.draw.points.length===2) return finishDraw()??true;
         if(state.draw.shape==="point"||state.draw.shape==="box"&&state.draw.points.length===2) return finishDraw()??true;
     } else {
         if(state.alignment.length>=4) return true;
@@ -307,6 +382,7 @@ async function withCapture(id) {
     state.chosen=id;
     if(state.selection.length<=1) state.selection=[id];
     resetFrame();
+    state.localLines=[]; state.localTrial=null; state.localDraft=null;
     await currentMatrix();
     if(state.tab==="align") await alignOpen();
     else render();
@@ -329,6 +405,43 @@ async function previewPlane() {
     const result=await rpc("/api/photos/"+row.id+"/alignments","POST",{revision:row.revision,alignment:align,preview:true});
     state.sourceView=dataSource(result.image); render();
 }
+function activeCorners() {
+    const row=capture();
+    const found=state.registration?.revisions.find(item=>item.id===row?.active_alignment)?.data;
+    return found?.corners||[[0,0],[1,0],[1,1],[0,1]];
+}
+function localSegments() {
+    return state.localLines.map(line=>({name:line.name,from:line.from,to:line.to,
+        measured_mm:line.measured_mm===null||line.measured_mm===""?null:Number(line.measured_mm)}));
+}
+async function previewLocalFit(formValues) {
+    state.localParams={tolerance_mm:formValues.tolerance_mm,smoothing:formValues.smoothing};
+    const row=capture();
+    if(!row?.active_alignment) throw Error("Save a four-corner alignment before fitting measured lines.");
+    const blank=state.localLines.filter(line=>line.measured_mm===null||line.measured_mm==="").map(line=>line.name);
+    if(blank.length) throw Error("Fill the measured millimetres for: "+blank.join(", "));
+    const alignment={title:formValues.title||"Local measured lines",model:"local",corners:activeCorners(),
+        local:{segments:localSegments(),tolerance_mm:formValues.tolerance_mm,smoothing:formValues.smoothing,
+               panel_mm:[state.panel.width_mm,state.panel.height_mm]}};
+    const answer=await rpc("/api/photos/"+row.id+"/alignments","POST",
+        {revision:row.revision,alignment,preview:true});
+    state.localTrial=answer;
+    state.localDraft=alignment;
+    state.preview=dataSource(answer.image);
+    render();
+}
+async function retainLocal() {
+    if(!state.localDraft) return;
+    const row=capture();
+    await rpc("/api/photos/"+row.id+"/alignments",
+        {revision:row.revision,alignment:state.localDraft,preview:false});
+    msg("Local measured-line fit retained");
+    await openPanel(state.panel.id,true);
+    await currentMatrix();
+    await alignOpen();
+    state.alignMode="local";
+    render();
+}
 const actions={
     panel:id=>openPanel(id),
     sample:async key=>{msg("Preparing specimen…");const data=await rpc("/api/samples/"+key,"POST");await openPanel(data.panel.id);},
@@ -337,6 +450,11 @@ const actions={
     "add":()=>dialog("Add camera capture",form("upload",input("Image file","photo","","file","accept=\"image/*,.tif,.tiff\" required")+captureFields(),"Import capture")),
     "edit-capture":()=>dialog("Capture details",form("edit-capture",captureFields(capture().data),"Save capture")+detail(capture().image,"Camera metadata")),
     capture:withCapture,alignment:alignOpen,
+    "align-mode":key=>{state.alignMode=key;state.draw=null;render();},
+    "add-local-line":()=>startLocalLine(false),
+    "add-frame-line":()=>startLocalLine(true),
+    "remove-local-line":i=>{state.localLines.splice(Number(i),1);state.localTrial=null;render();},
+    "retain-local":retainLocal,
     "show-camera":()=>{state.pictured=null;state.preview=null;state.sourceView=null;render();},
     "panel-plane":previewPlane,
     tab:async key=>{ if(key==="align") return alignOpen(); state.tab=key;state.draw=null; state.preview=null;render(); },
@@ -376,6 +494,7 @@ const submits={
     "edit-capture":async f=>{await rpc("/api/photos/"+state.chosen,"PUT",{revision:capture().revision,capture:fields(f,["exposure_ev","black_code"])});close();await openPanel(state.panel.id,true);msg("Capture settings saved");},
     analysis:run,
     align:async f=>{ const doc={title:f.get("title"),model:f.get("model"),corners:state.alignment}; const answer=await rpc("/api/photos/"+state.chosen+"/alignments","POST",{alignment:doc,revision:capture().revision,preview:true});state.alignParams=doc;state.alignTrial=answer;state.preview=dataSource(answer.image);render(); },
+    "local-fit":async f=>{ await previewLocalFit({title:f.get("title"),tolerance_mm:Number(f.get("tolerance_mm")),smoothing:Number(f.get("smoothing"))}); },
     retain:async f=>{const candidate=state.draft;const data=await rpc(api()+"/tools/"+candidate.kind,"POST",{...candidate.order,save:true,preview:candidate.fingerprint,name:f.get("name")});close();await openPanel(state.panel.id,true);await showRecord(data.record.id);msg("Inspection retained");},
     review:async f=>{const id=state.saved.id;await rpc("/api/inspections/"+id+"/review","PUT",{revision:state.saved.revision,...fields(f,[])});close();await openPanel(state.panel.id,true);await showRecord(id);},
     "new-survey":f=>{state.survey={name:f.get("name"),geometry:{marks:[]}};close();render();},
@@ -409,6 +528,12 @@ shell.addEventListener("change",e=>task(()=>{
     }
     if(e.target.id==="tool") {
         state.tool=e.target.value;state.options={};resetFrame();render();
+    }
+    const lineIndex=e.target.dataset.lineMm;
+    if(lineIndex!==undefined) {
+        const raw=e.target.value;
+        state.localLines[Number(lineIndex)].measured_mm=raw===""?null:Number(raw);
+        state.localTrial=null;
     }
 }));
 get("home").onclick=()=>task(library);

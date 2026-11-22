@@ -17,6 +17,7 @@ class Frame:
     code: np.ndarray
     present: np.ndarray
     clipped: np.ndarray
+    camera: object = None
 
     @property
     def signal(self):
@@ -41,15 +42,20 @@ class Frame:
 
 def load_frame(photo, reg, camera, grid):
     if reg:
-        basic_alignment = {k: reg["data"][k] for k in ("title", "corners", "model")}
-        alignment = Alignment.parse(basic_alignment)
+        if reg["data"].get("model") == "local":
+            from .localfit import build_warp
+            alignment = Alignment.parse(reg["data"])
+            alignment.warp, alignment.inverse_warp = build_warp(reg["data"]["local"])
+        else:
+            basic_alignment = {k: reg["data"][k] for k in ("title", "corners", "model")}
+            alignment = Alignment.parse(basic_alignment)
     else:
         alignment = Alignment.identity()
     code, present = sample_rgb(camera, alignment.to_camera(grid))
     clipped = present & np.any(code >= 0.993, axis=2)
     black = srgb_to_linear(photo["data"]["black_code"])
     rgb = np.maximum(srgb_to_linear(code) - black, 0) / 2 ** photo["data"]["exposure_ev"]
-    return Frame(photo, alignment, reg, rgb.astype(np.float32), code, present, clipped)
+    return Frame(photo, alignment, reg, rgb.astype(np.float32), code, present, clipped, camera)
 
 
 @dataclass(frozen=True)
