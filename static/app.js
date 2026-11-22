@@ -139,13 +139,28 @@ function setting(field) {
     if (field.input==="position") return '<div class="pick">'+input(field.label,field.key,JSON.stringify(current))+b("Mark","draw",field.key,"tight")+'</div>';
     return input(field.label,field.key,current,"number","step=\""+field.options+"\"");
 }
+function verdictBanner(result) {
+    if(result.kind!=="replacement-match"||!result.result) return "";
+    const data=result.result;
+    const swapped=data.verdict==="ranking_changes";
+    const rows=(data.conditions||[]).map(condition=>'<div class="scoped"><strong>'+text(condition.condition)+
+        '</strong><ol class="rank-list">'+condition.ranking.map(item=>'<li><span class="rank-no">#'+item.hue_rank+'</span> '+
+        text(item.name)+' <span class="quiet">hue '+text(item.hue_distance_deg)+'° · dL '+text(item.lightness_delta_l)+
+        ' · dE '+text(item.total_delta_e)+(item.brightness_flag?' · <span class="warn">brightness flag</span>':'')+
+        '</span></li>').join("")+'</ol></div>').join("");
+    return '<div class="notice '+(swapped?"verdict-swap":"verdict-ok")+'"><strong>'+
+        (swapped?"Rankings differ between the two lights":"Ranking consistent across both lights")+
+        '</strong><p class="quiet">'+text(data.recommendation)+'</p>'+rows+
+        (data.brightness_warnings?.length?'<p class="warn">'+text(data.brightness_warnings.length)+
+        ' brightness/hue flag(s); inspect the per-condition flags below.</p>':"")+'</div>';
+}
 function resultBox() {
     const result=active();
     if(!result) return "";
     const kind=state.saved?"Retained inspection":"Preview";
-    const extra=state.saved?'<div class="row">'+a("Evidence ZIP","/api/inspections/"+state.saved.id+"/packet")+a("Results-only ZIP","/api/inspections/"+state.saved.id+"/packet?originals=0")+a("Print sheet","/api/inspections/"+state.saved.id+"/sheet")+b("Review status","review-dialog","","tight")+b("Compare source settings","source-audit","","tight")+'</div>':
+    const extra=state.saved?'<div class="row">'+a("Evidence ZIP","/api/inspections/"+state.saved.id+"/packet")+a("Results-only ZIP","/api/inspections/"+state.saved.id+"/packet?originals=0")+a("Print sheet","/api/inspections/"+state.saved.id+"/sheet")+(result.kind==="replacement-match"?a("Selection sheet","/api/inspections/"+state.saved.id+"/selection-sheet","warm"):"")+b("Review status","review-dialog","","tight")+b("Compare source settings","source-audit","","tight")+'</div>':
         '<div class="row">'+b("Retain inspection","retain-dialog","","warm")+'</div>';
-    return '<div class="output"><h3>'+kind+'</h3>'+metrics(result.summary||result.result)+extra+detail(result.result)+detail(result.facts,"Source lineage")+'</div>';
+    return '<div class="output"><h3>'+kind+'</h3>'+metrics(result.summary||result.result)+verdictBanner(result)+extra+detail(result.result)+detail(result.facts,"Source lineage")+'</div>';
 }
 function inspection() {
     const current=definition();
@@ -246,7 +261,7 @@ function captureFields(meta={}) {
 }
 function drawing(key,inputType=null) {
     if(state.tab==="inspect") keepPresets();
-    const current=inputType || (key==="path"?"line":key==="boundary"?"polygon":["region","reference","background","color_reference","middle"].includes(key)?"box":"point");
+    const current=inputType || (key==="path"?"line":key==="boundary"?"polygon":["region","reference","background","color_reference","middle","original","sample_1","sample_2","sample_3","blank"].includes(key)?"box":"point");
     const rules={point:"Click a location on the camera image.",line:"Click a line or polyline on the camera image.",box:"Click two opposite corners.",polygon:"Click successive polygon vertices."};
     state.draw={key,shape:current,prompt:rules[current],points:[],cameraPoints:[]}; state.sourceView=null;
     render();

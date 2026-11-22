@@ -18,7 +18,7 @@ from .library import Library
 from .packets import MAX_ARCHIVE, archive_inspection, verify_packet
 from .picture import mask_overlay, png
 from .provenance import inspection_sources
-from .printroom import print_inspection, scale_target
+from .printroom import print_inspection, scale_target, selection_sheet_pdf
 from .sheets import archive_index_pdf
 from .survey import parse_survey
 from .tools import TOOLS, tool_by_key
@@ -300,6 +300,17 @@ def register_tools(app,library,executor):
         with executor:
             raw=print_inspection(library,record,paper,orientation,_expect_key(asset) if asset else None)
         return _deliver(raw,"application/pdf",f"inspection-{record['id'][:8]}.pdf",True)
+
+    @app.get("/api/inspections/<report_id>/selection-sheet")
+    def download_selection_sheet(report_id):
+        rid=ident(report_id)
+        paper=option(request.args.get("paper","a4"),"Paper size",("a4","letter","a3"))
+        orientation=option(request.args.get("orientation","landscape"),"Orientation",
+                           ("portrait","landscape"))
+        with executor:
+            record=library.report(rid)
+            raw=selection_sheet_pdf(library,record,paper,orientation)
+        return _deliver(raw,"application/pdf",f"selection-sheet-{rid[:8]}.pdf",True)
 
     @app.get("/api/panels/<panel_id>/inspection-index")
     def download_index(panel_id):

@@ -222,3 +222,86 @@ def scale_target(width,height,ticks,accent):
     _svg_text(svg,margin,sh-14,name)
     _svg_text(svg,margin,sh-8,f"{width:g} × {height:g} mm  ⎮  {gap:g} mm ticks  ⎮  print at 100%",3.1)
     return tostring(svg,encoding="utf-8",xml_declaration=True)
+
+
+def _ink_rgb(srgb):
+    return " ".join(f"{max(0,min(1,code/255)):.3f}" for code in srgb)
+
+
+def _pdf_swatch(page, x, y, size, srgb, caption):
+    page.content.append(f"{_ink_rgb(srgb)} rg {page.x(x)} {page.y(y+size)} {page.x(size)} {page.x(size)} re f")
+    page.content.append(f"0.3 G 0.4 w {page.x(x)} {page.y(y+size)} {page.x(size)} {page.x(size)} re S")
+    page.caption(x, y+size+3.4, caption, 7.5)
+
+
+def selection_sheet_pdf(library, record, paper="a4", orientation="landscape"):
+    """One-page-per-light printable record for on-site replacement checking."""
+    result = record["result"]
+    conditions = result.get("conditions")
+    if record.get("kind") != "replacement-match" or not conditions:
+        raise Problem("The selection sheet is only available for a replacement matching record.", 404)
+    width, height = _page_dimensions(paper, orientation)
+    pdf = PDF()
+    catalog = pdf.reserve()
+    pages = pdf.reserve()
+    font = pdf.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    panel = record["facts"]["panel"]
+    page_ids = []
+    for index, condition in enumerate(conditions, 1):
+        page = PDFPage(width, height, [])
+        page.caption(15, 18, "Vitrail Bench  /  replacement glass selection sheet", 15)
+        page.caption(15, 27, _short(record["name"], 70), 11)
+        page.caption(15, 34, f"{_short(panel['title'], 48)}   {panel['width_mm']:g} x {panel['height_mm']:g} mm", 8.5)
+        page.line(15, 38, width-15, 38)
+        page.caption(15, 47, f"Light {index} of {len(conditions)}: {_short(condition['condition'], 60)}", 12)
+        if condition.get("illuminant"):
+            page.caption(15, 53, f"Declared lamp: {_short(condition['illuminant'], 60)}", 8.5)
+        map_asset = next((a for a in record["assets"]
+                          if a["key"] == f"patch-map-{condition['capture'][:8]}"), None)
+        image_id = None
+        if map_asset:
+            image_id, img_w, img_h = _photo_object(pdf, library.blobs.read(map_asset["sha256"]))
+            box_w, box_h = (width-30)*0.58, height-118
+            factor = min(box_w/img_w, box_h/img_h)
+            draw_w, draw_h = img_w*factor, img_h*factor
+            page.image(15, 60, draw_w, draw_h)
+            page.caption(15, 60+draw_h+5, "Actually measured patch interiors (boxes)", 8)
+        right = 15 + (width-30)*0.62
+        page.caption(right, 60, "Hue ranking against the original fragment", 10)
+        y = 68
+        for item in condition["ranking"]:
+            _pdf_swatch(page, right, y, 9, item["sample_srgb"],
+                        f"#{item['hue_rank']} {_short(item['name'], 26)}")
+            page.caption(right+32, y+2.5,
+                         f"hue {item['hue_distance_deg']:g} deg   dL {item['lightness_delta_l']:g}   "
+                         f"dE {item['total_delta_e']:g}", 8)
+            if item["flags"]:
+                page.caption(right+32, y+7, "FLAG: " + _short("; ".join(item["flags"]), 52), 7.5)
+            y += 15
+        original = condition["patches"]["original"]
+        _pdf_swatch(page, right, y+3, 9, original["preview_srgb"], "Original")
+        page.caption(right+32, y+5.5,
+                     f"hue {original['hue_deg']:g} deg   L {original['lab'][0]:g}   chroma {original['chroma']:g}", 8)
+        blank = condition["patches"]["blank"]
+        _pdf_swatch(page, right, y+20, 9, blank["preview_srgb"], "Blank ref")
+        page.caption(right+32, y+22.5, f"coverage {blank['coverage']:g}   clipped {blank['clipped_pixels']}", 8)
+        footer = height - 30
+        page.line(15, footer-6, width-15, footer-6)
+        page.caption(15, footer,
+                     f"Brightness flag threshold |dL| >= {condition['brightness_limit_dl']:g}; "
+                     f"hue tie tolerance {condition['hue_tolerance_deg']:g} deg", 8)
+        page.caption(15, footer+6, _short(result.get("recommendation", ""), 110), 8.5)
+        page.caption(15, height-12, f"Record {record['id']}  |  page {index}/{len(conditions)}  |  "
+                     f"check piece labels and boxes on site", 7.5)
+        _scalebar(page, width-70, height-13, min(40, (width-30)/4))
+        commands = pdf.stream("\n".join(page.content))
+        resources = f"/Font << /F1 {font} 0 R >>"
+        if image_id is not None:
+            resources += f" /XObject << /Im0 {image_id} 0 R >>"
+        pid = pdf.add(f"<< /Type /Page /Parent {pages} 0 R /MediaBox [0 0 {page.x(width)} {page.x(height)}] "
+                      f"/Resources << {resources} >> /Contents {commands} 0 R >>")
+        page_ids.append(pid)
+    pdf.set(pages, "<< /Type /Pages /Count " + str(len(page_ids)) + " /Kids ["
+            + " ".join(f"{pid} 0 R" for pid in page_ids) + "] >>")
+    pdf.set(catalog, "<< /Type /Catalog /Pages " + f"{pages} 0 R >>")
+    return pdf.assemble(catalog)

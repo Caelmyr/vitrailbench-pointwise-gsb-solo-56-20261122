@@ -4,6 +4,7 @@ from .calibration import calibration_grid, camera_sampling_section, ruler_audit
 from .correspondence import pair_control, pattern_spacing, registered_edges
 from .inscription import frosted_haze, inscription_survey
 from .leads import lead_network, solder_joints
+from .matching import DEFAULT_BOXES, matching_report
 from .observation import patch_chart, photo_gaps, source_probe
 from .panes import lead_gauge, pane_catalog
 from .photometry import color_field, density, flatness, optical_section, registered_compare, transmission
@@ -65,6 +66,20 @@ LEAD=(
     number("min_run_mm","Minimum run (mm)",2.2),
 )
 
+def _matching_fields():
+    titles={
+        "original":"Original fragment box","sample_1":"Sample 1 box","sample_2":"Sample 2 box",
+        "sample_3":"Sample 3 box","blank":"Clear blank reference box",
+    }
+    fields=tuple(drawn(role,titles[role],DEFAULT_BOXES[role]) for role in
+                 ("original","sample_1","sample_2","sample_3","blank"))
+    return fields+(
+        number("brightness_limit_dl","Visible brightness gap (delta L)",6,.5),
+        number("hue_tolerance_deg","Hue tie tolerance (degrees)",4,.5),
+        number("minimum_pixels","Minimum patch pixels",64,8),
+    )
+
+
 TOOLS=(
     Tool("transmission","Transmitted signal","Light & color",1,(
         number("bins","Histogram bins",20,1),number("display_ceiling","Display ceiling",1),
@@ -87,6 +102,9 @@ TOOLS=(
          color_field,"Map color distance from a patch under the declared lighting."),
     Tool("swatches","Named color patch readings","Light & color",0,(),patch_chart,
          "Read the fixed set of neutral panel-coordinate patches across selected captures."),
+    Tool("replacement-match","Replacement glass sample matching","Light & color",2,
+         _matching_fields(),matching_report,
+         "Match three replacement samples to the surviving fragment on white-lamp and warm-lamp photos, using the clear blank as the in-frame light reference."),
     Tool("section","Optical section","Light & color",1,(
         drawn("path","Section points",[[.15,.5],[.85,.5]]),number("spacing_mm","Reading spacing (mm)",.7)),optical_section,
          "Trace brightness along a line or polyline while preserving missing intervals."),

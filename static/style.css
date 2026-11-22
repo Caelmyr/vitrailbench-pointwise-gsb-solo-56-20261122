@@ -3,3 +3,4 @@
 @media(max-width:1140px){.bench{grid-template-columns:165px minmax(320px,1fr) 280px}.rail{position:static}.photo-row{grid-template-columns:40px 1fr}.select-photo{grid-template-columns:1fr}.select-photo img{display:none}}
 @media(max-width:880px){.bench{grid-template-columns:165px minmax(300px,1fr)}.tools{grid-column:1/-1}.topbar{padding:10px 14px}.brand{font-size:17px}}
 @media(max-width:580px){.bench{display:grid;grid-template-columns:minmax(0,1fr)}.tools{grid-column:auto}.topbar{position:static;gap:9px;align-items:flex-start}.top-actions{justify-content:end}.library{padding:20px 14px}.rail,.image-area,.tools{padding:10px}.stage{min-height:160px}.fieldgrid{grid-template-columns:1fr}}
+.rank-list{margin:6px 0 2px;padding-left:20px;display:grid;gap:4px}.rank-list li{font-size:13px}.rank-no{color:var(--mint);font-weight:700}.verdict-swap{border-color:#9f6e66;background:#3c2a26}.verdict-ok{border-color:#496253;background:#26352f}
