@@ -1,0 +1,19 @@
+name: solo59-vitrail
+services:
+  web:
+    build: .
+    image: ${VITRAIL_IMAGE:-solo59-vitrail:1.0}
+    init: true
+    network_mode: bridge
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${VITRAIL_PORT:-19961}:8000"
+    volumes:
+      - panel-library:/var/lib/vitrail
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).read()"]
+      interval: 4s
+      timeout: 4s
+      retries: 9
+volumes:
+  panel-library:

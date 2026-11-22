@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Vitrail Bench</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script defer type="module" src="/assets/app.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <button class="brand" id="home"><span class="glazing" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Vitrail Bench</button>
+  <div class="top-actions">
+    <button id="verify">Verify packet</button>
+    <button id="scale">Scale target</button>
+    <button class="warm" id="new">New panel</button>
+  </div>
+</header>
+<main id="workspace" aria-live="polite"><p class="quiet">Opening the local collection…</p></main>
+<dialog id="dialog"></dialog>
+<div id="status" role="status" hidden></div>
+</body>
+</html>
