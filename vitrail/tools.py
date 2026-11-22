@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from .calibration import calibration_grid, camera_sampling_section, ruler_audit
 from .correspondence import pair_control, pattern_spacing, registered_edges
+from .flatfield import flatfield
 from .inscription import frosted_haze, inscription_survey
 from .leads import lead_network, solder_joints
 from .observation import patch_chart, photo_gaps, source_probe
@@ -78,6 +79,12 @@ TOOLS=(
         drawn("reference","Reference box",[.4,.35,.6,.65]),number("radius_mm","Neighborhood (mm)",8),
         number("allowed_delta_ev","Allowed deviation (EV)",.2,.01)),flatness,
          "Compare slowly varying brightness with a near-center reading."),
+    Tool("flatfield","Flat-field transmission correction","Light & color",2,(
+        number("smooth_mm","Field smoothing (mm)",2.5),number("borrow_mm","Borrow limit (mm)",12),
+        number("obscured_flat","Blocked flat fraction",.06,.005),
+        number("isolated_max_mm2","Largest isolated hole (mm²)",60,1),
+        number("strip_min_mm","Longest strip side (mm)",10,0.5)),flatfield,
+         "Divide a glass capture by an open-backlight capture, side by side, with borrowed readings marked."),
     Tool("compare","Registered capture comparison","Light & color",2,(
         number("tolerance_ev","Difference limit (EV)",.25,.01),
         drawn("reference","Shared reference area",[0,0,1,1]),number("mix","Wipe boundary",.5,.05)),registered_compare,

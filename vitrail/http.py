@@ -14,6 +14,7 @@ from .camera import MAX_PHOTO_BYTES, Alignment, open_camera
 from .contracts import (Problem, PanelSpec, PhotoSpec, WorkOrder, bool_value, digest, ident,
                         integer, keys, label, object_data, option, safe_filename)
 from .demo import SAMPLES, load_demo, thumbnail
+from .flatfield import reopen_correction
 from .library import Library
 from .packets import MAX_ARCHIVE, archive_inspection, verify_packet
 from .picture import mask_overlay, png
@@ -258,6 +259,13 @@ def register_tools(app,library,executor):
         asset,raw=library.report_asset(ident(report_id),_expect_key(key))
         download=asset["mime"]!="image/png" or request.args.get("download")=="1"
         return _deliver(raw,asset["mime"],asset["filename"],download)
+
+    @app.post("/api/inspections/<report_id>/corrected-preview")
+    def reopen_corrected(report_id):
+        rid=ident(report_id)
+        with executor:
+            result=reopen_correction(library,library.report(rid))
+        return result
 
     @app.get("/api/inspections/<report_id>/source-audit")
     def audit_sources(report_id):

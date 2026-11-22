@@ -117,7 +117,21 @@ def _glass(u,v,theme,flavor):
     if flavor=="flat":
         levels=.60*power+.02*np.sin(18*u+13*v)
         glass=levels[...,None]*np.array([1.03,1.00,.95])
-        return glass,np.ones(u.shape,dtype=bool)
+        # Mounting clips and a card edge interrupt the open backlight. A tiny drilled
+        # hole and a strip along the edge are left unphotographed on purpose so the
+        # correction has to state where it borrowed a neighbouring reading.
+        clip=((u<.045)&(v<.055))|((u>.94)&(v<.05))|((u<.05)&(v>.93))|((u>.93)&(v>.94))
+        shadow=np.exp(-(((u-.045)**2+(v-.055)**2)/.00035))+\
+               np.exp(-(((u-.955)**2+(v-.05)**2)/.00030))+\
+               np.exp(-(((u-.05)**2+(v-.94)**2)/.00040))+\
+               np.exp(-(((u-.94)**2+(v-.945)**2)/.00035))
+        glass[clip]=glass[clip]*.03
+        glass*=np.maximum(.32,1-.28*np.clip(shadow,0,1))[...,None]
+        clear=np.ones(u.shape,dtype=bool)
+        clear[(u<.038)&(v>.60)&(v<.66)]=False                        # short unphotographed strip
+        clear[(np.abs(u-.37)<.010)&(np.abs(v-.72)<.010)]=False       # isolated unphotographed hole
+        clear[(v>.975)]=False                                        # camera cut the lower edge
+        return glass,clear
     active=~((u<.032)&(v>.61)) if flavor!="reflected" else ~((u>.95)&(v>.65))
     if theme=="lantern" and flavor!="transmitted":
         active = active & ~((u>.63)&(u<.72)&(v>.90))

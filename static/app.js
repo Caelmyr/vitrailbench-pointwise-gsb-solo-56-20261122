@@ -139,13 +139,26 @@ function setting(field) {
     if (field.input==="position") return '<div class="pick">'+input(field.label,field.key,JSON.stringify(current))+b("Mark","draw",field.key,"tight")+'</div>';
     return input(field.label,field.key,current,"number","step=\""+field.options+"\"");
 }
+function displayOf(result) {
+    const data=result?.result||{};
+    if(result?.kind!=="flatfield") return "";
+    const parts=[["Direct",data.direct_share_of_corrected],["Isolated",data.isolated_hole_share],
+        ["Extended",data.extended_gap_share],["Long strip",data.long_strip_share],
+        ["Low confidence",data.low_confidence_share],["Uncorrected",data.uncorrected_share_of_observed]];
+    const legend=(data.legend||[]).filter(item=>item.name!=="direct"&&item.name!=="unfilled")
+        .map(item=>item.label+" ("+Math.round(item.base_confidence*100)+"%): "+item.description).join(" ");
+    return '<div class="notice"><strong>Borrowed flat readings</strong><span>'+
+        parts.filter(([,v])=>typeof v==="number").map(([k,v])=>k+" "+(v*100).toFixed(1)+"%").join(" · ")+
+        '</span><span class="quiet">'+text(legend)+'</span></div>';
+}
 function resultBox() {
     const result=active();
     if(!result) return "";
     const kind=state.saved?"Retained inspection":"Preview";
-    const extra=state.saved?'<div class="row">'+a("Evidence ZIP","/api/inspections/"+state.saved.id+"/packet")+a("Results-only ZIP","/api/inspections/"+state.saved.id+"/packet?originals=0")+a("Print sheet","/api/inspections/"+state.saved.id+"/sheet")+b("Review status","review-dialog","","tight")+b("Compare source settings","source-audit","","tight")+'</div>':
+    const reopened=result.kind==="flatfield"&&state.saved?'<div class="row">'+b("Reopen corrected preview","reopen-corrected","","warm")+'</div>':"";
+    const extra=state.saved?'<div class="row">'+a("Evidence ZIP","/api/inspections/"+state.saved.id+"/packet")+a("Results-only ZIP","/api/inspections/"+state.saved.id+"/packet?originals=0")+a("Print sheet","/api/inspections/"+state.saved.id+"/sheet")+b("Review status","review-dialog","","tight")+b("Compare source settings","source-audit","","tight")+'</div>'+reopened:
         '<div class="row">'+b("Retain inspection","retain-dialog","","warm")+'</div>';
-    return '<div class="output"><h3>'+kind+'</h3>'+metrics(result.summary||result.result)+extra+detail(result.result)+detail(result.facts,"Source lineage")+'</div>';
+    return '<div class="output"><h3>'+kind+'</h3>'+metrics(result.summary||result.result)+extra+displayOf(result)+detail(result.result)+detail(result.facts,"Source lineage")+'</div>';
 }
 function inspection() {
     const current=definition();
@@ -349,6 +362,14 @@ const actions={
     "activate-align":async key=>{await rpc("/api/photos/"+state.chosen+"/active-alignment","PUT",{revision:capture().revision,alignment_id:key||null});await openPanel(state.panel.id,true);await currentMatrix();await alignOpen();msg("Active alignment updated");},
     "retain-dialog":()=>dialog("Retain inspection",form("retain",input("Record name","name",state.draft.title),"Keep observed result")),
     record:showRecord,
+    "reopen-corrected":async()=>{const data=await rpc("/api/inspections/"+state.saved.id+"/corrected-preview","POST");
+        state.saved=null;state.tab="inspect";state.draw=null;state.pictured=null;state.sourceView=null;
+        state.preview=dataSource(data.image);
+        const changes=(data.source_changes||[]).filter(item=>item.missing||item.revised||!item.original_matches||!item.alignment_matches);
+        msg(changes.length?"Corrected preview rebuilt · source settings differ from the retained copy":"Corrected preview rebuilt from retained settings");
+        render();
+        dialog("Reopened corrected preview",'<p class="quiet">'+text(data.note)+'</p>'+
+            '<img class="dialog-pic" src="'+dataSource(data.image)+'" alt="Corrected preview">'+metrics(data.summary));},
     "source-audit":async()=>{const report=await rpc("/api/inspections/"+state.saved.id+"/source-audit");
         dialog("Retained and current source settings",'<p class="quiet">'+text(report.notes)+'</p>'+detail(report)+
           '<div class="row">'+report.sources.filter(source=>!source.missing).map(source=>a("Original · "+source.title,source.original_url)).join("")+'</div>');},
