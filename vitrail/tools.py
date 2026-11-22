@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from .bubbles import paired_bubbles
 from .calibration import calibration_grid, camera_sampling_section, ruler_audit
 from .correspondence import pair_control, pattern_spacing, registered_edges
 from .inscription import frosted_haze, inscription_survey
@@ -224,6 +225,14 @@ TOOLS=(
         number("max_area","Maximum area (mm²)",10),
         selection("polarity","Candidate polarity","dark",("dark","bright"))),seed_inclusions,
         "Inspect compact variations and their physical shape."),
+    Tool("bubble-census","Paired bubble census","Surface",2,(
+        number("radius_mm","Neighborhood (mm)",1.5),
+        number("cutoff","Local signal difference",.042,.001),
+        number("min_area","Minimum spot area (mm²)",.27,.05),
+        number("max_area","Maximum spot area (mm²)",30,1),
+        selection("polarity","Candidate polarity","dark",("dark","bright")),
+        number("match_mm","Centroid match tolerance (mm)",1,.05)),paired_bubbles,
+        "Census one region against two captures: count a matching bubble once, keep the possible range where a spot may hide two, and list spots seen in only one capture."),
     Tool("boundary","Marked-region boundary intensity","Coverage & records",1,(
         drawn("boundary","Mark boundary",[[.38,.38],[.63,.39],[.62,.61],[.39,.60]]),
         number("edge_mm","Boundary band (mm)",2.7),

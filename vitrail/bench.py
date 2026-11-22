@@ -59,6 +59,7 @@ class Bench:
     scale: PhysicalGrid
     selection: np.ndarray
     frames: tuple
+    originals: tuple = ()
 
     @classmethod
     def load(cls, library, panel_id, order):
@@ -71,7 +72,8 @@ class Bench:
         grid = scale.grid()
         frames = tuple(load_frame(record[0], record[1], camera, grid)
                        for record, camera in zip(records, cameras, strict=True))
-        return cls(panel, order, scale, order.region.mask(scale.width_px, scale.height_px), frames)
+        return cls(panel, order, scale, order.region.mask(scale.width_px, scale.height_px), frames,
+                   tuple(contents for _, _, contents in records))
 
     def exactly(self, count):
         if len(self.frames) != count:
