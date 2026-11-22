@@ -18,7 +18,7 @@ from .library import Library
 from .packets import MAX_ARCHIVE, archive_inspection, verify_packet
 from .picture import mask_overlay, png
 from .provenance import inspection_sources
-from .printroom import print_inspection, scale_target
+from .printroom import print_completion, print_inspection, scale_target
 from .sheets import archive_index_pdf
 from .survey import parse_survey
 from .tools import TOOLS, tool_by_key
@@ -240,9 +240,14 @@ def register_tools(app,library,executor):
             context=Bench.load(library,pid,order)
             outcome=tool.run(context)
             lineage=context.facts()
+            if tool.packet_originals:
+                lineage["source_originals"]=[dict(id=part["id"],role=part["role"],original=part["original"])
+                                             for part in outcome.details["sources"]]
             checksum=outcome.fingerprint(lineage)
             if not hold:
                 return outcome.presentation(lineage,checksum)
+            if outcome.blocked:
+                raise Problem(outcome.blocked,409)
             if payload.get("preview")!=checksum:
                 raise Problem("The observed result has changed. Run the preview again before retaining it.",409)
             filename=label(payload.get("name",tool.title),"Inspection name")
@@ -300,6 +305,18 @@ def register_tools(app,library,executor):
         with executor:
             raw=print_inspection(library,record,paper,orientation,_expect_key(asset) if asset else None)
         return _deliver(raw,"application/pdf",f"inspection-{record['id'][:8]}.pdf",True)
+
+    @app.get("/api/inspections/<report_id>/completion-sheet")
+    def download_completion_sheet(report_id):
+        record=library.report(ident(report_id))
+        if record["kind"]!="completion":
+            raise Problem("This inspection has no completion sheet.",404)
+        paper=request.args.get("paper","a4")
+        orientation=request.args.get("orientation","portrait")
+        asset=request.args.get("asset")
+        with executor:
+            raw=print_completion(library,record,paper,orientation,_expect_key(asset) if asset else None)
+        return _deliver(raw,"application/pdf",f"completion-{record['id'][:8]}.pdf",True)
 
     @app.get("/api/panels/<panel_id>/inspection-index")
     def download_index(panel_id):

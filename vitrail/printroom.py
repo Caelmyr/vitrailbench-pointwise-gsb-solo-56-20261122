@@ -179,6 +179,59 @@ def print_inspection(library,record,paper,orientation,asset_key=None):
     return pdf.assemble(catalog)
 
 
+def _lineage_rows(record):
+    roles={part["id"]:part["role"] for part in record["facts"].get("source_originals",[])}
+    return [(source.get("title",""),roles.get(source.get("id"),"—"),source.get("id",""),
+             str(source.get("original",""))[:16]) for source in record["facts"].get("sources",[])]
+
+
+def print_completion(library,record,paper,orientation,asset_key=None):
+    width,height=_page_dimensions(paper,orientation)
+    available=[asset for asset in record["assets"] if asset["mime"]=="image/png"
+               and asset["key"] in ("completed-panel","option-original","option-supplement","shared-area-choices")]
+    preferred=asset_key or ("completed-panel" if any(asset["key"]=="completed-panel" for asset in available)
+                            else "shared-area-choices")
+    selected=next((asset for asset in available if asset["key"]==preferred),None)
+    if selected is None:
+        raise Problem("Select an attached completion image.",404)
+    page=PDFPage(width,height,[])
+    pdf=PDF()
+    catalog=pdf.reserve()
+    pages=pdf.reserve()
+    unit=pdf.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    inner=width-30
+    page.caption(15,20,"Vitrail Bench  /  supplementary completion",16)
+    page.caption(15,29,_short(record["name"]),13)
+    page.caption(15,37,f"Retained: {_short(record['created'],25)}  |  Status: {record['review']['state']}",9)
+    case=record['facts']['panel']
+    page.caption(15,43,f"{_short(case['title'],50)}   {case['width_mm']:g} x {case['height_mm']:g} mm",9)
+    page.line(15,47,width-15,47)
+    img_obj,img_w,img_h=_photo_object(pdf,library.blobs.read(selected["sha256"]))
+    ratio=min(inner/img_w,(height-152)/img_h)
+    w,h=img_w*ratio,img_h*ratio
+    page.image(15+(inner-w)/2,55,w,h)
+    y=55+h+7
+    page.caption(15,y,"Cross-hatched ground was not captured by either source. Colours show which capture supplied each area.",8)
+    y+=5
+    for index,(key,value) in enumerate(_sheet_summary(record)):
+        col=index%2
+        row=index//2
+        page.caption(15+col*inner/2,y+row*4.4,f"{_short(key,31)}: {_short(value,27)}",8)
+    y+=4.4*6+3
+    page.caption(15,y,"Source lineage",9)
+    for index,(title,role,ident,checksum) in enumerate(_lineage_rows(record)):
+        page.caption(15,y+5+index*4.2,f"{_short(title,42)}  ·  {_short(role,30)}  ·  {ident}",7.5)
+        page.caption(95,y+5+index*4.2,f"original {checksum}",7.5)
+    page.caption(15,height-13,f"Record {record['id']}  ·  derived composite; source captures unchanged",7.5)
+    commands=pdf.stream("\n".join(page.content))
+    resources=f"/Font << /F1 {unit} 0 R >> /XObject << /Im0 {img_obj} 0 R >>"
+    p=pdf.add(f"<< /Type /Page /Parent {pages} 0 R /MediaBox [0 0 {page.x(width)} {page.x(height)}] "
+              f"/Resources << {resources} >> /Contents {commands} 0 R >>")
+    pdf.set(pages,f"<< /Type /Pages /Count 1 /Kids [{p} 0 R] >>")
+    pdf.set(catalog,f"<< /Type /Catalog /Pages {pages} 0 R >>")
+    return pdf.assemble(catalog)
+
+
 def _svg_line(svg,a,b,color="#232b39",width=.25):
     SubElement(svg,"line",{"x1":_units(a[0]),"y1":_units(a[1]),"x2":_units(b[0]),"y2":_units(b[1]),
                           "stroke":color,"stroke-width":_units(width)})

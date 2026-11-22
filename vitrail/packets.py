@@ -33,9 +33,27 @@ def _file_alias(record):
     return f"results/{record['key']}.{ext}"
 
 
-def _camera_alias(metadata):
-    suffix={"PNG":"png","JPEG":"jpg","TIFF":"tif","WEBP":"webp"}[metadata["image"]["format"]]
-    return f"captures/{metadata['id']}.{suffix}"
+def _camera_alias(record):
+    suffix={"PNG":"png","JPEG":"jpg","TIFF":"tif","WEBP":"webp"}[record["image"]["format"]]
+    return f"captures/{record['id']}.{suffix}"
+
+
+def _lineage_sources(observations):
+    supplied=observations.get("source_originals") if isinstance(observations,dict) else None
+    cited=observations.get("sources",[]) if isinstance(observations,dict) else []
+    if supplied is None:
+        return cited
+    if not isinstance(supplied,list) or len(supplied)!=len(cited):
+        raise Problem("Source originals do not match the cited captures.")
+    merged=[]
+    for capture,extra in zip(cited,supplied,strict=True):
+        if not isinstance(extra,dict) or extra.get("id")!=capture.get("id") or not re.fullmatch(r"[a-f0-9]{64}",str(extra.get("original"))):
+            raise Problem("Source originals do not match the cited captures.")
+        role=extra.get("role")
+        if not isinstance(role,str) or not 1<=len(role)<=48:
+            raise Problem("A source role is missing from the packet lineage.")
+        merged.append({**capture,"role":role,"original":extra["original"]})
+    return merged
 
 
 def _line(path,contents,role,link):
@@ -78,7 +96,7 @@ def archive_inspection(library,report_id,include_sources=True):
                 rows.append(_line(path,contents,"analysis",meta["key"]))
                 _writer(z,path,contents)
             if include_sources:
-                for photo in report["facts"]["sources"]:
+                for photo in _lineage_sources(report["facts"]):
                     contents=library.blobs.read(photo["original"])
                     path=_camera_alias(photo)
                     total+=len(contents)
@@ -166,12 +184,15 @@ def _capture_refs(manifest,rows):
     if not isinstance(observations,dict) or not isinstance(observations.get("sources"),list):
         raise Problem("Manifest is missing the selected capture references.")
     sources={}
-    for capture in observations["sources"]:
+    roles={}
+    for capture in _lineage_sources(observations):
         if not isinstance(capture,dict) or not re.fullmatch(r"[a-f0-9]{32}",str(capture.get("id"))) or not re.fullmatch(r"[a-f0-9]{64}",str(capture.get("original"))):
             raise Problem("A capture reference has invalid identity or checksum.")
         if capture["id"] in sources:
             raise Problem("Repeated source capture reference.")
         sources[capture["id"]]=capture["original"]
+        if "role" in capture:
+            roles[capture["id"]]=capture["role"]
     included=manifest.get("source_capture_bytes_included")
     if not isinstance(included,bool):
         raise Problem("Manifest does not say whether camera bytes were included.")
@@ -185,7 +206,7 @@ def _capture_refs(manifest,rows):
         tally[token]=name
     if (included and set(tally)!=set(sources)) or (not included and tally):
         raise Problem("Source camera listing does not match the packet scope.")
-    return len(sources),len(tally)
+    return len(sources),len(tally),roles
 
 
 def verify_packet(data):
@@ -198,7 +219,7 @@ def verify_packet(data):
             rows=_manifest_rows(manifest)
             if set(rows)!=set(listing)-{"manifest.json"}:
                 raise Problem("Archive inventory differs from the manifest.")
-            source_total,included=_capture_refs(manifest,rows)
+            source_total,included,roles=_capture_refs(manifest,rows)
             if "results/readout.json" not in rows or rows["results/readout.json"]["role"]!="report":
                 raise Problem("The evidence archive lacks its report data.")
             if any(not name.startswith("results/") for name,part in rows.items() if part["role"]=="analysis"):
@@ -223,5 +244,5 @@ def verify_packet(data):
     except (RuntimeError,BadZipFile,OSError,NotImplementedError) as error:
         raise Problem("The archive could not be opened as a supported evidence packet.") from error
     return {"valid":True,"schema":SCHEMA,"report":record,"files":len(rows),"counts":counts,
-            "cited_captures":source_total,"source_photographs":included,
+            "cited_captures":source_total,"source_photographs":included,"source_roles":roles,
             "scope":"Checks archive contents against its own manifest. It does not authenticate the author."}

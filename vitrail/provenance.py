@@ -30,6 +30,7 @@ def inspection_sources(library,record):
     archived=info["panel"]
     current=library.panel_summary(archived["id"])["panel"]
     changed_size=[archived["width_mm"],archived["height_mm"]]!=[current["width_mm"],current["height_mm"]]
+    roles={part["id"]:part["role"] for part in info.get("source_originals",[]) if "role" in part}
     audit=[]
     for photo in info["sources"]:
         try:
@@ -37,12 +38,13 @@ def inspection_sources(library,record):
         except Problem as error:
             if error.status!=404:
                 raise
-            audit.append(dict(capture=photo["id"],title=photo["title"],missing=True))
+            audit.append(dict(capture=photo["id"],title=photo["title"],missing=True,role=roles.get(photo["id"])))
             continue
         if active["panel_id"]!=archived["id"]:
             raise Problem("Stored source no longer belongs to its panel.",409)
         changed=_difference(photo,active)
         changed["missing"]=False
+        changed["role"]=roles.get(photo["id"])
         changed["preview_url"]=f"/api/photos/{photo['id']}/view/preview"
         changed["original_url"]=f"/api/photos/{photo['id']}/view/original"
         audit.append(changed)

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from .calibration import calibration_grid, camera_sampling_section, ruler_audit
+from .completion import supplementary_completion
 from .correspondence import pair_control, pattern_spacing, registered_edges
 from .inscription import frosted_haze, inscription_survey
 from .leads import lead_network, solder_joints
@@ -39,6 +40,7 @@ class Tool:
     fields: tuple
     run: object
     explanation: str
+    packet_originals: bool = False
 
     def public(self):
         return dict(key=self.key,title=self.title,area=self.area,input_count=self.input_count,
@@ -257,7 +259,14 @@ TOOLS=(
         number("half_width_mm","Strip half width (mm)",3.5),
         number("spacing_mm","Read spacing (mm)",1.1),
         number("support","Minimum shared support",.65,.05)),strip_pair,
-        "Compare jointly captured registered strip sections.")
+        "Compare jointly captured registered strip sections."),
+    Tool("completion","Supplementary panel completion","Coverage & records",2,(
+        number("tolerance_mm","Mark residual limit (mm)",1.5,.1),
+        number("color_tolerance","Rendering difference limit",7,1),
+        selection("model","Placement model","affine",("similarity","affine","projective")),
+        selection("overlap","Shared-area placement","auto",("auto","original","supplement"))),supplementary_completion,
+        "Place a partial supplementary capture on the whole-window original from paired marks and keep the original where it is clear.",
+        True)
 
 )
 INDEX={tool.key:tool for tool in TOOLS}

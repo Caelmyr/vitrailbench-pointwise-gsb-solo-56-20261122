@@ -6,7 +6,7 @@ const state = {
     panels:[], samples:[], tools:[], panel:null, photos:[], reports:[], surveys:[], activity:[],
     chosen:null, selection:[], tab:"inspect", tool:"transmission", options:{}, region:[0,0,1,1],
     draft:null, saved:null, preview:null, pictured:null, draw:null, alignment:[], alignTrial:null,
-    sourceView:null, survey:null, busy:false, loadingPanel:null
+    sourceView:null, survey:null, busy:false, loadingPanel:null, controls:null, controlSide:0
 };
 const api = () => "/api/panels/"+state.panel.id;
 const capture = () => state.photos.find(photo => photo.id === state.chosen);
@@ -76,7 +76,7 @@ async function library() {
     state.panels=bank.panels; state.samples=examples.samples; state.panel=null;
     state.loadingPanel=null; state.busy=false; render();
 }
-function resetFrame() { state.draft=null; state.saved=null; state.pictured=null; state.preview=null; state.draw=null; state.sourceView=null; }
+function resetFrame() { state.draft=null; state.saved=null; state.pictured=null; state.preview=null; state.draw=null; state.sourceView=null; state.controls=null; state.controlSide=0; }
 async function openPanel(id,keep=false) {
     state.loadingPanel=id;
     const result=await rpc("/api/panels/"+id);
@@ -109,22 +109,40 @@ function overlay() {
     if(state.tab==="align") points=state.alignment;
     let marks="";
     if(points.length) marks='<polyline points="'+points.map(([x,y])=>x*1000+","+y*1000).join(" ")+'" fill="none" stroke="#f3d376" stroke-width="2"/>'+points.map(([x,y])=>'<circle cx="'+x*1000+'" cy="'+y*1000+'" r="6" fill="#f3d376" stroke="#323b3d" stroke-width="1"/>').join("");
+    if(state.draw?.key==="controls") {
+        const pairs=state.controls||[];
+        marks=pairs.map((pair,index)=>pair[state.controlSide]?
+            '<circle cx="'+pair[state.controlSide][0]*1000+'" cy="'+pair[state.controlSide][1]*1000+'" r="7" fill="none" stroke="#a7d7c6" stroke-width="2.5"/>'+
+            '<text x="'+Math.min(990,pair[state.controlSide][0]*1000+9)+'" y="'+Math.min(990,pair[state.controlSide][1]*1000+13)+'" fill="#dff3e9" font-size="12">'+text(String(index+1))+'</text>':"").join("");
+    }
     if(state.draw?.shape==="box" && points.length===2) {
         const [p,q]=points;
         marks+='<rect x="'+Math.min(p[0],q[0])*1000+'" y="'+Math.min(p[1],q[1])*1000+'" width="'+Math.abs(p[0]-q[0])*1000+'" height="'+Math.abs(p[1]-q[1])*1000+'" fill="none" stroke="#f3d376" stroke-width="2"/>';
     }
     return '<svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">'+marks+'</svg>';
 }
+function pickNotice(draw) {
+    if(draw.key!=="controls") return '<p class="notice">'+text(draw.prompt)+" "+draw.points.length+" point(s). "+b("Use marks","finish-draw","","tight")+b("Cancel","cancel-draw","","tight")+'</p>';
+    const names=state.selection.map(id=>state.photos.find(photo=>photo.id===id)?.data.title||"Capture");
+    const pairs=state.controls||[[],[]];
+    return '<p class="notice"><strong>Paired marks</strong> Click the same few spots on each capture. '+
+        '<span class="row">'+names.map((name,index)=>b(name+((pairs[index]||[]).length?" · "+(pairs[index]).length:""),"control-side",String(index),(index===state.controlSide?"warm":"tight"))).join("")+'</span>'+
+        b("Done","finish-draw","","tight")+b("Cancel","cancel-draw","","tight")+'</p>';
+}
 function stage() {
     const result=active();
     const item=result?.assets.find(part=>part.key===state.pictured&&part.mime==="image/png");
     let natural=state.chosen?"/api/photos/"+state.chosen+"/view/preview":"";
+    if(state.draw?.key==="controls") {
+        const side=state.selection[state.controlSide];
+        if(side) natural="/api/photos/"+side+"/view/preview";
+    }
     let picture=state.sourceView||state.preview||dataSource(item)||natural;
     if(state.draw||state.tab==="align") picture=state.alignTrial&&state.preview?state.preview:natural;
     if(state.tab==="align"&&state.alignTrial) picture=state.preview;
     const labelText=picture===natural?"Camera preview":state.tab==="align"?"Aligned panel preview":item?.key?.replaceAll("-"," ")||"Registered panel preview";
     return '<section class="image-area" aria-label="Panel image"><div class="image-bar"><h2>'+text(labelText)+'</h2><div class="row">'+b("Camera","show-camera","","tight")+b("Panel plane","panel-plane","","tight")+'</div></div>'+
-        (state.draw?'<p class="notice">'+text(state.draw.prompt)+" "+state.draw.points.length+" point(s). "+b("Use marks","finish-draw","","tight")+b("Cancel","cancel-draw","","tight")+'</p>':"")+
+        (state.draw?pickNotice(state.draw):"")+
         '<div class="stage">'+(picture?'<div class="plate '+(state.draw||state.tab==="align"?"drawing":"")+'" id="plate"><img src="'+picture+'" alt="'+text(labelText)+'">'+overlay()+'</div>':'<div class="empty">Add a capture to open the image workbench.</div>')+"</div>"+
         (result?assets(result):"")+"</section>";
 }
@@ -143,9 +161,10 @@ function resultBox() {
     const result=active();
     if(!result) return "";
     const kind=state.saved?"Retained inspection":"Preview";
-    const extra=state.saved?'<div class="row">'+a("Evidence ZIP","/api/inspections/"+state.saved.id+"/packet")+a("Results-only ZIP","/api/inspections/"+state.saved.id+"/packet?originals=0")+a("Print sheet","/api/inspections/"+state.saved.id+"/sheet")+b("Review status","review-dialog","","tight")+b("Compare source settings","source-audit","","tight")+'</div>':
-        '<div class="row">'+b("Retain inspection","retain-dialog","","warm")+'</div>';
-    return '<div class="output"><h3>'+kind+'</h3>'+metrics(result.summary||result.result)+extra+detail(result.result)+detail(result.facts,"Source lineage")+'</div>';
+    const extra=state.saved?'<div class="row">'+a("Evidence ZIP","/api/inspections/"+state.saved.id+"/packet")+a("Results-only ZIP","/api/inspections/"+state.saved.id+"/packet?originals=0")+a("Print sheet","/api/inspections/"+state.saved.id+"/sheet")+(state.saved.kind==="completion"?a("Completion sheet","/api/inspections/"+state.saved.id+"/completion-sheet"):"")+b("Review status","review-dialog","","tight")+b("Compare source settings","source-audit","","tight")+'</div>':
+        (result.blocked?"":'<div class="row">'+b("Retain inspection","retain-dialog","","warm")+'</div>');
+    const blocked=!state.saved&&result.blocked?'<div class="notice"><strong>Which capture should win the shared area?</strong><p>'+text(result.blocked)+' Show each option and choose.</p><div class="row">'+b("Keep original where shared","choose-overlap","original","warm")+b("Use supplementary across it","choose-overlap","supplement","tight")+'</div></div>':"";
+    return '<div class="output"><h3>'+kind+'</h3>'+blocked+metrics(result.summary||result.result)+extra+detail(result.result)+detail(result.facts,"Source lineage")+'</div>';
 }
 function inspection() {
     const current=definition();
@@ -154,8 +173,9 @@ function inspection() {
     const options=Object.entries(groups).map(([name,tools])=>'<optgroup label="'+text(name)+'">'+tools.map(tool=>'<option value="'+tool.key+'" '+(tool.key===state.tool?"selected":"")+'>'+text(tool.title)+'</option>').join("")+'</optgroup>').join("");
     const drawRegion='<div class="pick">'+input("Panel window","region",JSON.stringify(state.region))+b("Mark","draw","region","tight")+'</div>';
     const surveyPick=state.tool==="survey"?selection("Survey","survey",state.surveys.map(x=>[x.id,x.name]),state.survey?.id):"";
+    const pairs=state.tool==="completion"&&state.selection.length===2?'<div class="row"><span class="quiet">Matching marks: '+((state.options.controls||[]).length)+'</span>'+b("Place marks","draw","controls","tight")+'</div>':"";
     return '<div class="settings"><label>Tool<select id="tool">'+options+'</select></label><p class="quiet">'+text(current.explanation)+'</p>'+
-        '<form data-form="analysis">'+drawRegion+current.fields.map(setting).join("")+surveyPick+
+        '<form data-form="analysis">'+drawRegion+pairs+current.fields.map(setting).join("")+surveyPick+
         '<button type="submit" class="warm" '+(state.busy||!state.selection.length?"disabled":"")+'>Run inspection</button></form></div>'+resultBox();
 }
 function alignPane() {
@@ -210,6 +230,7 @@ function requestOrder() {
         options.marks=state.survey.geometry.marks;
     }
     const captures=state.tab==="survey"&&state.tool==="survey"?[state.chosen]:state.selection;
+    if(tool.key==="completion"&&!(options.controls||[]).length) throw Error("Place matching marks on the two captures first.");
     return {captures,region:state.region,options, resolution:700};
 }
 async function run() {
@@ -246,14 +267,33 @@ function captureFields(meta={}) {
 }
 function drawing(key,inputType=null) {
     if(state.tab==="inspect") keepPresets();
+    if(key==="controls") {
+        if(state.selection.length!==2) throw Error("Select exactly two captures first.");
+        state.controls=[[],[]];
+        state.controlSide=0;
+        state.draw={key,shape:"point",prompt:"Click the same spots on each capture.",points:[],cameraPoints:[]};
+        state.sourceView=null;
+        render();
+        return;
+    }
     const current=inputType || (key==="path"?"line":key==="boundary"?"polygon":["region","reference","background","color_reference","middle"].includes(key)?"box":"point");
     const rules={point:"Click a location on the camera image.",line:"Click a line or polyline on the camera image.",box:"Click two opposite corners.",polygon:"Click successive polygon vertices."};
-    state.draw={key,shape:current,prompt:rules[current],points:[],cameraPoints:[]}; state.sourceView=null;
+    state.draw={key,shape:current,prompt:rules[current],points:[],cameraPoints:[]};
+    state.sourceView=null;
     render();
 }
 function finishDraw() {
     const selected=state.draw;
     if(!selected) return;
+    if(selected.key==="controls") {
+        const pairs=state.controls||[];
+        const complete=pairs[0]?.length && pairs[0].length===pairs[1]?.length;
+        if(!complete) throw Error("Mark the same number of spots on both captures.");
+        state.options.controls=pairs[0].map((point,index)=>({name:"Mark "+(index+1),first:point,second:pairs[1][index]}));
+        state.draw=null;
+        render();
+        return;
+    }
     const points=selected.points,limit={point:1,line:2,box:2,polygon:3}[selected.shape];
     if(points.length<limit) throw Error("Mark more points before using this selection.");
     const place=selected.shape==="point"?points[0]:selected.shape==="box"?
@@ -273,7 +313,7 @@ function pointEvent(event) {
     if(!box.width||!box.height) return true;
     let point=[(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height].map(v=>Number(Math.max(0,Math.min(1,v)).toFixed(6)));
     const cameraPoint=point;
-    if (state.draw && state.tab !== "align" && capture()?.active_alignment) {
+    if (state.draw && state.draw.key!=="controls" && state.tab !== "align" && capture()?.active_alignment) {
         const m=state.activeMatrix;
         if (!m) throw Error("Load the panel plane first or reactivate its alignment.");
         const [a,b,c]=m, [x,y]=point;
@@ -283,6 +323,12 @@ function pointEvent(event) {
         if (Math.abs(det)<1e-8) throw Error("Point cannot be mapped to the panel.");
         point=[(ad*bc-ab*bd)/det,(aa*bd-ad*bb)/det].map(v=>Number(v.toFixed(6)));
         if (point.some(v=>v<0||v>1)) throw Error("That point is outside the aligned panel.");
+    }
+    if(state.draw?.key==="controls" && state.tab!=="align") {
+        state.controls[state.controlSide].push(cameraPoint);
+        state.controlSide=state.controls[0].length<=state.controls[1].length?0:1;
+        render();
+        return true;
     }
     if(state.draw) {
         const limit={point:1,box:2,line:90,polygon:120}[state.draw.shape];
@@ -342,6 +388,8 @@ const actions={
     tab:async key=>{ if(key==="align") return alignOpen(); state.tab=key;state.draw=null; state.preview=null;render(); },
     asset:key=>{state.pictured=key;state.preview=null;state.sourceView=null;render();},
     draw:key=>drawing(key),
+    "control-side":key=>{state.controlSide=Number(key);render();},
+    "choose-overlap":async key=>{state.options.overlap=key;await run();msg(key==="original"?"Keeping the original in shared areas":"Using the supplementary capture across its footprint");},
     "finish-draw":finishDraw,
     "cancel-draw":()=>{state.draw=null;render();},
     "clear-align":()=>{state.alignment=[];state.alignTrial=null;state.preview=null;render();},

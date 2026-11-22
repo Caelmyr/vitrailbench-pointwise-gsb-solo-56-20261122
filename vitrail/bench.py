@@ -160,6 +160,7 @@ class Result:
     summary: dict
     details: dict
     assets: tuple
+    blocked: str | None = None
 
     def fingerprint(self, facts):
         return digest(frozen_json({"kind": self.kind, "summary": self.summary, "details": self.details,
@@ -167,7 +168,8 @@ class Result:
 
     def presentation(self, facts, fingerprint):
         return dict(kind=self.kind, title=self.title, summary=self.summary, result=self.details,
-                    facts=facts, fingerprint=fingerprint, assets=[part.presentation() for part in self.assets])
+                    facts=facts, fingerprint=fingerprint, blocked=self.blocked,
+                    assets=[part.presentation() for part in self.assets])
 
 
 class WorkBudget:
