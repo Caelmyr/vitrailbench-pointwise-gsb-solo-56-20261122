@@ -246,7 +246,7 @@ function captureFields(meta={}) {
 }
 function drawing(key,inputType=null) {
     if(state.tab==="inspect") keepPresets();
-    const current=inputType || (key==="path"?"line":key==="boundary"?"polygon":["region","reference","background","color_reference","middle"].includes(key)?"box":"point");
+    const current=inputType || (["path","manual_edge"].includes(key)?"line":key==="boundary"?"polygon":["region","reference","background","color_reference","middle"].includes(key)?"box":"point");
     const rules={point:"Click a location on the camera image.",line:"Click a line or polyline on the camera image.",box:"Click two opposite corners.",polygon:"Click successive polygon vertices."};
     state.draw={key,shape:current,prompt:rules[current],points:[],cameraPoints:[]}; state.sourceView=null;
     render();

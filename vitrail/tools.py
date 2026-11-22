@@ -12,6 +12,7 @@ from .quality import border_shadow, channel_clip, exposure_check, repeatability
 from .resolution import edge_resolution, focus_map
 from .shape_checks import boundary_intensity, seed_inclusions, support_distance
 from .sheets import aligned_asset, comparison_card
+from .templates import paper_templates
 from .traces import line_impression, strip_pair
 from .surface import crack_candidates, edge_roughness, glare, texture
 from .survey import grid_loss, survey_measure
@@ -105,6 +106,13 @@ TOOLS=(
         number("half_width_mm","Gauge half width (mm)",5),number("darkness","Lead signal threshold",.07,.005),
         number("crossings","Cross sections",17,1)),lead_gauge,
          "Measure the dark run across a drawn centerline when both edges are visible."),
+    Tool("template","Replacement paper templates","Construction",1,LEAD+(
+        number("close_lead_gap_mm","Preview gap closing (mm)",.8),
+        number("min_pane_mm2","Minimum pane (mm²)",120,1),
+        number("pane","Pane number",1,1),number("allowance_mm","Lead-channel allowance (mm)",1.5,.1),
+        drawn("manual_edge","Two visible points around the clip",[[.42,.30],[.42,.62]]),
+        selection("print_variant","1:1 sheet to print","observed",("observed","completed"))),paper_templates,
+         "Compare an observed-only and a trend-completed paper pattern for one pane, then print the chosen one at full size."),
     Tool("texture","Impressed glass texture","Surface",1,(
         number("wavelength_mm","Feature spacing (mm)",2.4),number("neighborhood_mm","Neighborhood (mm)",7.5),
         number("min_coherence","Minimum direction coherence",.36,.03)),texture,
