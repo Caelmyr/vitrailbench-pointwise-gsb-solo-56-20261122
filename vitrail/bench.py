@@ -102,7 +102,7 @@ class Bench:
 
     def facts(self):
         names = ("id", "title", "accession", "width_mm", "height_mm", "revision", "synthetic")
-        return dict(panel={key: self.panel[key] for key in names}, parameters=self.order.public(),
+        return dict(panel={key: self.panel[key] for key in names}, parameters=self.order.fingerprint_inputs(),
                     scale=self.scale.public(), sources=[frame.describe(self) for frame in self.frames])
 
 
@@ -161,13 +161,22 @@ class Result:
     details: dict
     assets: tuple
 
-    def fingerprint(self, facts):
-        return digest(frozen_json({"kind": self.kind, "summary": self.summary, "details": self.details,
-                                  "inputs": facts, "assets": [part.meta() for part in self.assets]}))
+    def evidence_digest(self, facts, exempt=frozenset()):
+        # Determination annotations are excluded: they record a human decision about unchanged
+        # evidence, so retaining them must still match the original preview fingerprint.
+        strip = lambda value: {key: item for key, item in value.items() if key not in exempt}
+        return digest(frozen_json({"kind": self.kind, "summary": strip(self.summary),
+                                   "details": strip(self.details), "inputs": facts,
+                                   "assets": [part.meta() for part in self.assets]}))
+
+    def determination_digest(self, evidence, exempt=frozenset()):
+        decision = {key: self.details.get(key) for key in sorted(exempt) if key in self.details}
+        return digest(evidence.encode() + frozen_json({"determination": decision}))
 
     def presentation(self, facts, fingerprint):
         return dict(kind=self.kind, title=self.title, summary=self.summary, result=self.details,
-                    facts=facts, fingerprint=fingerprint, assets=[part.presentation() for part in self.assets])
+                    facts=facts, fingerprint=fingerprint,
+                    assets=[part.presentation() for part in self.assets])
 
 
 class WorkBudget:

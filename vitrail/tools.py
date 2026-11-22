@@ -4,6 +4,7 @@ from .calibration import calibration_grid, camera_sampling_section, ruler_audit
 from .correspondence import pair_control, pattern_spacing, registered_edges
 from .inscription import frosted_haze, inscription_survey
 from .leads import lead_network, solder_joints
+from .adjudication import joint_adjudication
 from .observation import patch_chart, photo_gaps, source_probe
 from .panes import lead_gauge, pane_catalog
 from .photometry import color_field, density, flatness, optical_section, registered_compare, transmission
@@ -96,6 +97,8 @@ TOOLS=(
     Tool("joints","Solder joint review","Construction",1,LEAD+(
         number("arm_radius_mm","Arm check radius (mm)",5),),solder_joints,
          "Inspect arm separation and visible support at possible junctions."),
+    Tool("joint-adjudication","Labeled joint connection","Construction",1,(),joint_adjudication,
+         "Mark a paper-label occluder and the visible lead arms, then compare the ways the hidden solder joint could be wired."),
     Tool("panes","Window-pane catalog","Construction",1,LEAD+(
         number("close_lead_gap_mm","Preview gap closing (mm)",.8),
         number("min_pane_mm2","Minimum pane (mm²)",120,1)),pane_catalog,

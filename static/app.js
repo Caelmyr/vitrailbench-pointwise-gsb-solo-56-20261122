@@ -6,7 +6,7 @@ const state = {
     panels:[], samples:[], tools:[], panel:null, photos:[], reports:[], surveys:[], activity:[],
     chosen:null, selection:[], tab:"inspect", tool:"transmission", options:{}, region:[0,0,1,1],
     draft:null, saved:null, preview:null, pictured:null, draw:null, alignment:[], alignTrial:null,
-    sourceView:null, survey:null, busy:false, loadingPanel:null
+    sourceView:null, survey:null, busy:false, loadingPanel:null, adjudication:null
 };
 const api = () => "/api/panels/"+state.panel.id;
 const capture = () => state.photos.find(photo => photo.id === state.chosen);
@@ -77,6 +77,10 @@ async function library() {
     state.loadingPanel=null; state.busy=false; render();
 }
 function resetFrame() { state.draft=null; state.saved=null; state.pictured=null; state.preview=null; state.draw=null; state.sourceView=null; }
+const isAdjudication = () => state.tool === "joint-adjudication";
+function blankAdjudication() {
+    return {cover:null, fragments:[], chosen:null, note:"", nextId:1};
+}
 async function openPanel(id,keep=false) {
     state.loadingPanel=id;
     const result=await rpc("/api/panels/"+id);
@@ -122,7 +126,7 @@ function stage() {
     let picture=state.sourceView||state.preview||dataSource(item)||natural;
     if(state.draw||state.tab==="align") picture=state.alignTrial&&state.preview?state.preview:natural;
     if(state.tab==="align"&&state.alignTrial) picture=state.preview;
-    const labelText=picture===natural?"Camera preview":state.tab==="align"?"Aligned panel preview":item?.key?.replaceAll("-"," ")||"Registered panel preview";
+    const labelText=picture===natural?"Camera preview":state.tab==="align"?"Aligned panel preview":(item?.key?.startsWith("joint-hypothesis")?"Inferred connection (dashed = hidden)":item?.key?.replaceAll("-"," ")||"Registered panel preview");
     return '<section class="image-area" aria-label="Panel image"><div class="image-bar"><h2>'+text(labelText)+'</h2><div class="row">'+b("Camera","show-camera","","tight")+b("Panel plane","panel-plane","","tight")+'</div></div>'+
         (state.draw?'<p class="notice">'+text(state.draw.prompt)+" "+state.draw.points.length+" point(s). "+b("Use marks","finish-draw","","tight")+b("Cancel","cancel-draw","","tight")+'</p>':"")+
         '<div class="stage">'+(picture?'<div class="plate '+(state.draw||state.tab==="align"?"drawing":"")+'" id="plate"><img src="'+picture+'" alt="'+text(labelText)+'">'+overlay()+'</div>':'<div class="empty">Add a capture to open the image workbench.</div>')+"</div>"+
@@ -143,13 +147,62 @@ function resultBox() {
     const result=active();
     if(!result) return "";
     const kind=state.saved?"Retained inspection":"Preview";
+    const adjudicationExtra = result.kind==="joint-adjudication"
+        ? '<div class="notice"><strong>'+(result.result.chosen_hypothesis?("Determination: hypothesis #"+result.result.chosen_hypothesis):"No determination selected")+'</strong>'+
+          (result.result.analyst_note?'<p>'+text(result.result.analyst_note)+'</p>':"")+
+          '<div class="row">'+b("Camera (unchanged original)","show-camera","","tight")+b("Panel plane","panel-plane","","tight")+'</div></div>' : "";
     const extra=state.saved?'<div class="row">'+a("Evidence ZIP","/api/inspections/"+state.saved.id+"/packet")+a("Results-only ZIP","/api/inspections/"+state.saved.id+"/packet?originals=0")+a("Print sheet","/api/inspections/"+state.saved.id+"/sheet")+b("Review status","review-dialog","","tight")+b("Compare source settings","source-audit","","tight")+'</div>':
         '<div class="row">'+b("Retain inspection","retain-dialog","","warm")+'</div>';
-    return '<div class="output"><h3>'+kind+'</h3>'+metrics(result.summary||result.result)+extra+detail(result.result)+detail(result.facts,"Source lineage")+'</div>';
+    return '<div class="output"><h3>'+kind+'</h3>'+metrics(result.summary||result.result)+adjudicationExtra+extra+detail(result.result)+detail(result.facts,"Source lineage")+'</div>';
+}
+function adjudicationPanel() {
+    const a = state.adjudication || (state.adjudication = blankAdjudication());
+    const coverRow = a.cover
+        ? '<div class="row"><span>'+text(a.cover.title)+' · '+a.cover.points.length+' vertices</span>'+b("Redraw label","adj-cover","","tight")+b("Remove","adj-clear-cover","","tight")+'</div>'
+        : '<div class="notice">Step 1 — draw the paper label that hides the solder joint. Its interior is treated as unobserved.</div>'+
+          b("Draw paper label (polygon)","adj-cover","","warm");
+    const fragmentRows = a.fragments.length
+        ? a.fragments.map((f,i)=>'<div class="row"><span>'+text(f.title)+' · '+f.points.length+' points</span>'+b("Remove","adj-remove-fragment",String(i),"tight")+'</div>').join("")
+        : '<p class="quiet">No visible lead fragments marked yet.</p>';
+    const draft = state.draft;
+    const hypBlock = draft && draft.kind === "joint-adjudication" ? adjudicationHypotheses(draft) : "";
+    return '<div class="adjudication"><h3>Labeled joint</h3>'+
+        '<label>Label title<input id="adj-cover-title" value="'+text(a.cover?.title || "Paper label")+'"></label>'+
+        coverRow+
+        '<div class="notice">Step 2 — trace each lead came you can still see, up to the label edge. Hidden parts are never drawn as evidence.</div>'+
+        b("Draw visible lead (polyline)","adj-fragment","","warm")+
+        '<div class="mark-grid">'+fragmentRows+'</div>'+
+        '<label>Analyst note (saved with the determination)<textarea id="adj-note" rows="2">'+text(a.note)+'</textarea></label>'+
+        hypBlock+'</div>';
+}
+function adjudicationHypotheses(draft) {
+    const hyps = draft.result.hypotheses || [];
+    const a = state.adjudication;
+    const chosen = a.chosen;
+    const rows = hyps.map(h => {
+        const active = chosen === h.number;
+        const pairs = h.pairs.length ? h.pairs.map(p=>p.join("–")).join(", ") : "all arms to center";
+        return '<button type="button" class="report-row '+(active?"chosen":"")+'" data-act="adj-pick" data-key="'+h.number+'">'+
+            '<strong>#'+h.number+' '+text(h.connection)+' · rank '+h.rank+' ('+text(h.standing)+')</strong>'+
+            '<span>'+text(pairs)+' · score '+h.score+' · '+Math.round(100*h.hidden_inside_label_fraction)+'% inside label</span></button>';
+    }).join("");
+    const ignored = (draft.result.ignored_fragments||[]).length
+        ? '<p class="warn">Ignored (do not reach the label): '+draft.result.ignored_fragments.map(text).join(", ")+'</p>' : "";
+    return '<div class="output"><h3>Plausible connections</h3><p class="quiet">Solid cyan on the image is photographed lead; dashed lines inside the label are inferred, not observed. Click a row to compare it on the stage.</p>'+
+        '<div class="reports">'+rows+'</div>'+ignored+
+        (chosen ? '<p class="quiet">Selected determination: hypothesis #'+chosen+'</p>' : '<p class="warn">Select the connection you can defend before retaining.</p>')+'</div>';
 }
 function inspection() {
     const current=definition();
     if(!current) return "";
+    if(isAdjudication()) {
+        const drawRegion='<div class="pick">'+input("Panel window","region",JSON.stringify(state.region))+b("Mark","draw","region","tight")+'</div>';
+        return '<div class="settings"><label>Tool<select id="tool">'+state.tools.map(tool=>'<option value="'+tool.key+'" '+(tool.key===state.tool?"selected":"")+'>'+text(tool.title)+'</option>').join("")+'</select></label>'+
+            '<p class="quiet">'+text(current.explanation)+'</p>'+
+            '<form data-form="analysis">'+drawRegion+
+            '<button type="submit" class="warm" '+(state.busy||!state.selection.length?"disabled":"")+'>List possible connections</button></form></div>'+
+            adjudicationPanel()+resultBox();
+    }
     const groups=Object.groupBy ? Object.groupBy(state.tools,tool=>tool.area) : state.tools.reduce((g,tool)=>{(g[tool.area]??=[]).push(tool);return g;},{});
     const options=Object.entries(groups).map(([name,tools])=>'<optgroup label="'+text(name)+'">'+tools.map(tool=>'<option value="'+tool.key+'" '+(tool.key===state.tool?"selected":"")+'>'+text(tool.title)+'</option>').join("")+'</optgroup>').join("");
     const drawRegion='<div class="pick">'+input("Panel window","region",JSON.stringify(state.region))+b("Mark","draw","region","tight")+'</div>';
@@ -209,6 +262,16 @@ function requestOrder() {
         if(!state.survey?.geometry.marks?.length) throw Error("Choose a survey with at least one mark.");
         options.marks=state.survey.geometry.marks;
     }
+    if(tool.key==="joint-adjudication") {
+        const a=state.adjudication||(state.adjudication=blankAdjudication());
+        if(!a.cover) throw Error("Draw the paper label polygon first.");
+        if(a.fragments.length<2) throw Error("Trace at least two visible lead fragments reaching the label.");
+        a.note=get("adj-note")?.value||a.note;
+        options.cover=a.cover;
+        options.fragments=a.fragments;
+        if(a.chosen!=null) options.chosen_hypothesis=a.chosen;
+        if(a.note) options.analyst_note=a.note;
+    }
     const captures=state.tab==="survey"&&state.tool==="survey"?[state.chosen]:state.selection;
     return {captures,region:state.region,options, resolution:700};
 }
@@ -216,13 +279,19 @@ async function run() {
     keepPresets();
     const payload=requestOrder();
     const token=state.panel.id+"-"+state.tool;
+    if(state.tool==="joint-adjudication" && state.adjudication) state.adjudication.chosen=null;
     state.busy=true; render();
     try {
         const work=await rpc(api()+"/tools/"+state.tool,"POST",payload);
         if(token!==state.panel?.id+"-"+state.tool) return;
         state.draft={...work, order:payload};
         state.saved=null; state.preview=null; state.sourceView=null;
-        state.pictured=state.draft.assets.find(part=>part.mime==="image/png")?.key;
+        if(state.tool==="joint-adjudication") {
+            const leading=work.result.hypotheses.find(h=>h.rank===1)||work.result.hypotheses[0];
+            state.pictured="joint-hypothesis-"+leading.number;
+        } else {
+            state.pictured=state.draft.assets.find(part=>part.mime==="image/png")?.key;
+        }
     } finally {state.busy=false; render();}
 }
 async function alignOpen() {
@@ -246,8 +315,8 @@ function captureFields(meta={}) {
 }
 function drawing(key,inputType=null) {
     if(state.tab==="inspect") keepPresets();
-    const current=inputType || (key==="path"?"line":key==="boundary"?"polygon":["region","reference","background","color_reference","middle"].includes(key)?"box":"point");
-    const rules={point:"Click a location on the camera image.",line:"Click a line or polyline on the camera image.",box:"Click two opposite corners.",polygon:"Click successive polygon vertices."};
+    const current=inputType || (key==="path"?"line":key==="boundary"||key==="adj-cover"?"polygon":key==="adj-fragment"?"line":["region","reference","background","color_reference","middle"].includes(key)?"box":"point");
+    const rules={point:"Click a location on the camera image.",line:"Click a line or polyline on the camera image.",box:"Click two opposite corners.",polygon:"Click successive polygon vertices, then use the marks button."};
     state.draw={key,shape:current,prompt:rules[current],points:[],cameraPoints:[]}; state.sourceView=null;
     render();
 }
@@ -262,6 +331,13 @@ function finishDraw() {
     else if(selected.key==="new-survey-mark") {
         const mark={...selected.mark,points:selected.shape==="point"?[place]:place};
         state.survey.geometry.marks.push(mark);
+    } else if(selected.key==="adj-cover") {
+        const a=state.adjudication||(state.adjudication=blankAdjudication());
+        const title=(get("adj-cover-title")?.value||"Paper label").trim()||"Paper label";
+        a.cover={title,points:place};
+    } else if(selected.key==="adj-fragment") {
+        const a=state.adjudication||(state.adjudication=blankAdjudication());
+        a.fragments.push({title:"Lead "+(a.nextId++),points:place});
     } else state.options[selected.key]=place;
     state.draw=null;
     render();
@@ -314,7 +390,16 @@ async function withCapture(id) {
 async function showRecord(id) {
     const {record}=await rpc("/api/inspections/"+id);
     state.saved=record; state.draft=null; state.preview=null; state.sourceView=null;
-    state.pictured=record.assets.find(asset=>asset.mime==="image/png")?.key;
+    if(record.kind==="joint-adjudication") {
+        state.tool="joint-adjudication";
+        state.adjudication={...blankAdjudication(),
+            cover:record.result.occluder && {title:record.result.occluder.title,points:record.result.occluder.polygon},
+            fragments:(record.result.visible_arms||[]).map((arm,i)=>({title:arm.fragment,points:[]})),
+            chosen:record.result.chosen_hypothesis, note:record.result.analyst_note||""};
+        state.pictured=record.result.chosen_hypothesis?("joint-hypothesis-"+record.result.chosen_hypothesis):"joint-overview";
+    } else {
+        state.pictured=record.assets.find(asset=>asset.mime==="image/png")?.key;
+    }
     state.tab="record"; render();
 }
 async function previewPlane() {
@@ -347,7 +432,18 @@ const actions={
     "clear-align":()=>{state.alignment=[];state.alignTrial=null;state.preview=null;render();},
     "retain-align":async()=>{ await rpc("/api/photos/"+state.chosen+"/alignments","POST",{alignment:state.alignParams,revision:capture().revision,preview:false});await openPanel(state.panel.id,true);await currentMatrix();await alignOpen();msg("Alignment retained"); },
     "activate-align":async key=>{await rpc("/api/photos/"+state.chosen+"/active-alignment","PUT",{revision:capture().revision,alignment_id:key||null});await openPanel(state.panel.id,true);await currentMatrix();await alignOpen();msg("Active alignment updated");},
-    "retain-dialog":()=>dialog("Retain inspection",form("retain",input("Record name","name",state.draft.title),"Keep observed result")),
+    "retain-dialog":()=>{
+        if(state.draft.kind==="joint-adjudication") {
+            const a=state.adjudication;
+            if(a.chosen==null) return msg("Select the connection you can defend before retaining.",true);
+            dialog("Retain manual determination",form("retain-adjudication",
+                input("Record name","name",state.draft.title)+
+                '<div class="notice">Determination: hypothesis #'+a.chosen+'. The source photograph stays unaltered; reopen it anytime with the Camera button.</div>'+
+                notes("Analyst note","analyst_note",a.note),"Save determination"));
+            return;
+        }
+        dialog("Retain inspection",form("retain",input("Record name","name",state.draft.title),"Keep observed result"));
+    },
     record:showRecord,
     "source-audit":async()=>{const report=await rpc("/api/inspections/"+state.saved.id+"/source-audit");
         dialog("Retained and current source settings",'<p class="quiet">'+text(report.notes)+'</p>'+detail(report)+
@@ -362,7 +458,19 @@ const actions={
         selection("Condition","role",["feature","repair","missing","datum","note"].map(v=>[v,v]),"feature"),"Draw mark")),
     "remove-mark":key=>{state.survey.geometry.marks=state.survey.geometry.marks.filter(mark=>mark.key!==key);render();},
     "save-survey":async()=>{const d=state.survey;const result=await rpc(api()+"/surveys","POST",{name:d.name,marks:d.geometry.marks,id:d.id,revision:d.revision});state.survey=structuredClone(result.survey);await openPanel(state.panel.id,true);msg("Survey retained");},
-    "survey-measure":()=>{state.tool="survey";state.options={};return run();}
+    "survey-measure":()=>{state.tool="survey";state.options={};return run();},
+    "adj-cover":()=>drawing("adj-cover"),
+    "adj-fragment":()=>drawing("adj-fragment"),
+    "adj-clear-cover":()=>{state.adjudication.cover=null;render();},
+    "adj-remove-fragment":i=>{state.adjudication.fragments.splice(Number(i),1);render();},
+    "adj-pick":number=>{
+        const n=Number(number);
+        state.adjudication.chosen=n;
+        state.pictured="joint-hypothesis-"+n;
+        state.sourceView=null; state.preview=null;
+        render();
+    },
+    "adj-original":()=>{state.pictured=null;state.preview=null;state.sourceView=null;render();}
 };
 function fields(info, numeric) {
     const body={};
@@ -377,6 +485,14 @@ const submits={
     analysis:run,
     align:async f=>{ const doc={title:f.get("title"),model:f.get("model"),corners:state.alignment}; const answer=await rpc("/api/photos/"+state.chosen+"/alignments","POST",{alignment:doc,revision:capture().revision,preview:true});state.alignParams=doc;state.alignTrial=answer;state.preview=dataSource(answer.image);render(); },
     retain:async f=>{const candidate=state.draft;const data=await rpc(api()+"/tools/"+candidate.kind,"POST",{...candidate.order,save:true,preview:candidate.fingerprint,name:f.get("name")});close();await openPanel(state.panel.id,true);await showRecord(data.record.id);msg("Inspection retained");},
+    "retain-adjudication":async f=>{
+        const a=state.adjudication;
+        const order=requestOrder();
+        const candidate=state.draft;
+        const data=await rpc(api()+"/tools/"+candidate.kind,"POST",
+            {...order,save:true,preview:candidate.fingerprint,name:f.get("name")});
+        close();await openPanel(state.panel.id,true);await showRecord(data.record.id);msg("Determination retained");
+    },
     review:async f=>{const id=state.saved.id;await rpc("/api/inspections/"+id+"/review","PUT",{revision:state.saved.revision,...fields(f,[])});close();await openPanel(state.panel.id,true);await showRecord(id);},
     "new-survey":f=>{state.survey={name:f.get("name"),geometry:{marks:[]}};close();render();},
     "add-mark":f=>{const doc=fields(f,[]);close();drawing("new-survey-mark",doc.kind);state.draw.mark={...doc,key:crypto.randomUUID().replaceAll("-","").slice(0,16)};},
@@ -408,7 +524,9 @@ shell.addEventListener("change",e=>task(()=>{
         if(go) go.disabled=!state.selection.length;
     }
     if(e.target.id==="tool") {
-        state.tool=e.target.value;state.options={};resetFrame();render();
+        state.tool=e.target.value;state.options={};resetFrame();
+        if(state.tool==="joint-adjudication") state.adjudication=blankAdjudication();
+        render();
     }
 }));
 get("home").onclick=()=>task(library);

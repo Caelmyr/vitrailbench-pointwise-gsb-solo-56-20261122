@@ -207,6 +207,10 @@ class WorkOrder:
     corrections: dict
     resolution: int
 
+    # Adjudication fields annotate the observation but never change the computed evidence,
+    # so a determination can be retained against the unchanged preview fingerprint.
+    FINGERPRINT_EXEMPT = frozenset(("chosen_hypothesis", "analyst_note", "adjudicated"))
+
     @classmethod
     def parse(cls, raw):
         doc = object_data(raw, "Inspection")
@@ -228,3 +232,9 @@ class WorkOrder:
     def public(self):
         return dict(captures=list(self.capture_ids), region=self.region.public(),
                     options=self.toolbox, registrations=self.corrections, resolution=self.resolution)
+
+    def fingerprint_inputs(self):
+        options = {key: value for key, value in self.toolbox.items()
+                   if key not in WorkOrder.FINGERPRINT_EXEMPT}
+        return dict(captures=list(self.capture_ids), region=self.region.public(),
+                    options=options, registrations=self.corrections, resolution=self.resolution)

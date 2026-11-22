@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS reports(
     id TEXT PRIMARY KEY, panel_id TEXT NOT NULL REFERENCES panels(id), kind TEXT NOT NULL,
     name TEXT NOT NULL, result TEXT NOT NULL, facts TEXT NOT NULL, assets TEXT NOT NULL,
     created TEXT NOT NULL, review TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
-    fingerprint TEXT NOT NULL
+    fingerprint TEXT NOT NULL, decision TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS report_panel ON reports(panel_id, created, id);
 CREATE TABLE IF NOT EXISTS surveys(
@@ -121,6 +121,9 @@ class Library:
         with self.connection() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(reports)").fetchall()}
+            if "decision" not in columns:
+                conn.execute("ALTER TABLE reports ADD COLUMN decision TEXT NOT NULL DEFAULT ''")
 
     @contextmanager
     def connection(self, write=False):
@@ -342,7 +345,7 @@ class Library:
                 paired.append((photo, alignment))
         return panel, [(photo, alignment, self.blobs.read(photo["original"])) for photo, alignment in paired]
 
-    def save_report(self, panel_id, name, result, facts, signature):
+    def save_report(self, panel_id, name, result, facts, signature, decision=""):
         created = utc()
         choices = [part.persist(self.blobs) for part in result.assets]
         with self.connection(True) as conn:
@@ -358,9 +361,9 @@ class Library:
                 raise Problem(f"A panel may hold up to {REPORT_LIMIT} inspections.", 413)
             rid = new_id()
             review = {"state": "observed", "by": "", "note": "", "at": None}
-            conn.execute("INSERT INTO reports VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+            conn.execute("INSERT INTO reports VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
                          (rid, panel_id, result.kind, name, encode(result.details), encode(facts), encode(choices),
-                          created, encode(review), signature))
+                          created, encode(review), signature, decision))
             record_action(conn, panel_id, "inspection-retained", rid, {"kind": result.kind})
             return self._report(conn, rid)
 

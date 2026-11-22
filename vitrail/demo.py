@@ -31,8 +31,12 @@ SAMPLES=(
     Specimen("ivy","Ivy Stairlight","SYN-ST11",176,132,"ivy",
              "Three glazing bays with soft rolled texture, painted details and a sloping bright hairline."),
     Specimen("lantern","Copper Lantern","SYN-LA28",154,115.5,"lantern",
-             "Honey and cobalt color fields with crossing leadwork, a bright highlight and a missing camera margin."),
+             "Honey and cobalt color fields with crossing leadwork, a bright highlight, a missing camera margin and a paper label hiding one solder joint."),
 )
+
+# Opaque conservation paper label pasted over a crossing lead joint (panel-normalized quadrilateral).
+LABEL_POLY=np.array([[.232,.238],[.318,.228],[.330,.310],[.244,.322]],dtype=np.float32)
+LABEL_FILL=np.array([.80,.745,.60],dtype=np.float32)
 
 
 IVY_COLORS=np.array([[.14,.37,.52],[.62,.42,.10],[.39,.21,.19],[.19,.40,.26],[.30,.49,.31],
@@ -105,6 +109,19 @@ def _glass(u,v,theme,flavor):
         lead |= tiny_cross
     glass[lead|outer]=dark[lead|outer,None]*np.array([1.05,1,.95])
     glass=_insert_lines(glass,u,v,theme)
+    if theme=="lantern":
+        label=np.zeros(u.shape,dtype=bool)
+        poly=LABEL_POLY
+        for a,b in zip(poly,np.roll(poly,-1,axis=0)):
+            crossing=((a[1]>v)!=(b[1]>v)) & (u < (b[0]-a[0])*(v-a[1])/(b[1]-a[1])+a[0])
+            label ^= crossing
+        rim=np.zeros_like(label)
+        for a,b in zip(poly,np.roll(poly,-1,axis=0)):
+            span=np.hypot(b[0]-a[0],b[1]-a[1])
+            t=np.clip(((u-a[0])*(b[0]-a[0])+(v-a[1])*(b[1]-a[1]))/span**2,0,1)
+            rim |= np.hypot(u-(a[0]+t*(b[0]-a[0])),v-(a[1]+t*(b[1]-a[1])))<.0016
+        glass[label]=LABEL_FILL
+        glass[rim]=LABEL_FILL*.62
     power=.93+.11*u-.15*v+.1*np.cos(3*u-2*v)
     if flavor=="comparison":
         power=.79+.24*u-.020*v

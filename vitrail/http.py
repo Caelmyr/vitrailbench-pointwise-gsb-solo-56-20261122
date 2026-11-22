@@ -240,13 +240,17 @@ def register_tools(app,library,executor):
             context=Bench.load(library,pid,order)
             outcome=tool.run(context)
             lineage=context.facts()
-            checksum=outcome.fingerprint(lineage)
+            # Tools that carry manual determination fields exclude them from the evidence
+            # digest, so a retained determination still matches its unchanged preview.
+            exempt=WorkOrder.FINGERPRINT_EXEMPT if tool.key=="joint-adjudication" else frozenset()
+            checksum=outcome.evidence_digest(lineage,exempt)
             if not hold:
                 return outcome.presentation(lineage,checksum)
             if payload.get("preview")!=checksum:
                 raise Problem("The observed result has changed. Run the preview again before retaining it.",409)
             filename=label(payload.get("name",tool.title),"Inspection name")
-            receipt=library.save_report(pid,filename,outcome,lineage,checksum)
+            decision=outcome.determination_digest(checksum,exempt)
+            receipt=library.save_report(pid,filename,outcome,lineage,checksum,decision)
         return {"record":_build_record(receipt)},201
 
     @app.get("/api/inspections/<report_id>")
