@@ -237,7 +237,7 @@ def register_tools(app,library,executor):
         _validate_selection(tool,order)
         hold=bool_value(payload.get("save",False),"Save inspection")
         with executor:
-            context=Bench.load(library,pid,order)
+            context=Bench.load(library,pid,order,keep_sources=tool.needs_sources)
             outcome=tool.run(context)
             lineage=context.facts()
             checksum=outcome.fingerprint(lineage)

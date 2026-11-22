@@ -120,7 +120,7 @@ function stage() {
     const item=result?.assets.find(part=>part.key===state.pictured&&part.mime==="image/png");
     let natural=state.chosen?"/api/photos/"+state.chosen+"/view/preview":"";
     let picture=state.sourceView||state.preview||dataSource(item)||natural;
-    if(state.draw||state.tab==="align") picture=state.alignTrial&&state.preview?state.preview:natural;
+    if((state.draw&&!state.draw.panelPick)||state.tab==="align") picture=state.alignTrial&&state.preview?state.preview:natural;
     if(state.tab==="align"&&state.alignTrial) picture=state.preview;
     const labelText=picture===natural?"Camera preview":state.tab==="align"?"Aligned panel preview":item?.key?.replaceAll("-"," ")||"Registered panel preview";
     return '<section class="image-area" aria-label="Panel image"><div class="image-bar"><h2>'+text(labelText)+'</h2><div class="row">'+b("Camera","show-camera","","tight")+b("Panel plane","panel-plane","","tight")+'</div></div>'+
@@ -136,14 +136,14 @@ function optionValue(field) { return state.options[field.key]??field.default; }
 function setting(field) {
     const current=optionValue(field);
     if (field.input==="select") return selection(field.label,field.key,field.options.map(v=>[v,v]),current);
-    if (field.input==="position") return '<div class="pick">'+input(field.label,field.key,JSON.stringify(current))+b("Mark","draw",field.key,"tight")+'</div>';
+    if (field.input==="position"||field.input==="panel_position") return '<div class="pick">'+input(field.label,field.key,current==null?"":JSON.stringify(current))+b("Mark","draw",field.key,"tight")+'</div>';
     return input(field.label,field.key,current,"number","step=\""+field.options+"\"");
 }
 function resultBox() {
     const result=active();
     if(!result) return "";
     const kind=state.saved?"Retained inspection":"Preview";
-    const extra=state.saved?'<div class="row">'+a("Evidence ZIP","/api/inspections/"+state.saved.id+"/packet")+a("Results-only ZIP","/api/inspections/"+state.saved.id+"/packet?originals=0")+a("Print sheet","/api/inspections/"+state.saved.id+"/sheet")+b("Review status","review-dialog","","tight")+b("Compare source settings","source-audit","","tight")+'</div>':
+    const extra=state.saved?'<div class="row">'+a("Evidence ZIP","/api/inspections/"+state.saved.id+"/packet")+a("Results-only ZIP","/api/inspections/"+state.saved.id+"/packet?originals=0")+a("Print sheet","/api/inspections/"+state.saved.id+"/sheet")+b("Re-check settings","recheck","","tight")+b("Review status","review-dialog","","tight")+b("Compare source settings","source-audit","","tight")+'</div>':
         '<div class="row">'+b("Retain inspection","retain-dialog","","warm")+'</div>';
     return '<div class="output"><h3>'+kind+'</h3>'+metrics(result.summary||result.result)+extra+detail(result.result)+detail(result.facts,"Source lineage")+'</div>';
 }
@@ -196,7 +196,7 @@ function keepPresets() {
     for(const field of definition().fields) {
         const raw=formData.get(field.key);
         if(raw===null) continue;
-        try { state.options[field.key]=field.input==="position"?JSON.parse(raw):field.input==="number"?Number(raw):raw; }
+        try { state.options[field.key]=(field.input==="position"||field.input==="panel_position")?(raw.trim()===""?null:JSON.parse(raw)):field.input==="number"?Number(raw):raw; }
         catch { throw Error("Enter coordinates as a JSON list or use Mark."); }
     }
     try {state.region=JSON.parse(formData.get("region"));} catch {throw Error("Enter four region bounds or use Mark.");}
@@ -246,9 +246,15 @@ function captureFields(meta={}) {
 }
 function drawing(key,inputType=null) {
     if(state.tab==="inspect") keepPresets();
-    const current=inputType || (key==="path"?"line":key==="boundary"?"polygon":["region","reference","background","color_reference","middle"].includes(key)?"box":"point");
+    const fieldDef=definition()?.fields.find(field=>field.key===key);
+    const panelPick=!inputType&&fieldDef?.input==="panel_position";
+    if(panelPick) {
+        const maps=active()?.assets.filter(part=>part.mime==="image/png"&&part.panel_box)||[];
+        if(maps.length) state.pictured=maps[0].key;
+    }
+    const current=inputType||(panelPick?"point":key==="path"?"line":key==="boundary"?"polygon":["region","reference","background","color_reference","middle"].includes(key)?"box":"point");
     const rules={point:"Click a location on the camera image.",line:"Click a line or polyline on the camera image.",box:"Click two opposite corners.",polygon:"Click successive polygon vertices."};
-    state.draw={key,shape:current,prompt:rules[current],points:[],cameraPoints:[]}; state.sourceView=null;
+    state.draw={key,shape:current,prompt:panelPick?"Click a spot on the shown result image.":rules[current],points:[],cameraPoints:[],panelPick}; state.sourceView=null;
     render();
 }
 function finishDraw() {
@@ -273,7 +279,11 @@ function pointEvent(event) {
     if(!box.width||!box.height) return true;
     let point=[(event.clientX-box.left)/box.width,(event.clientY-box.top)/box.height].map(v=>Number(Math.max(0,Math.min(1,v)).toFixed(6)));
     const cameraPoint=point;
-    if (state.draw && state.tab !== "align" && capture()?.active_alignment) {
+    const shown=state.draw?.panelPick?active()?.assets.find(part=>part.key===state.pictured&&part.mime==="image/png"):null;
+    if (shown?.panel_box) {
+        const [left,top,right,bottom]=shown.panel_box;
+        point=[left+point[0]*(right-left),top+point[1]*(bottom-top)].map(v=>Number(Math.max(0,Math.min(1,v)).toFixed(6)));
+    } else if (state.draw && state.tab !== "align" && capture()?.active_alignment) {
         const m=state.activeMatrix;
         if (!m) throw Error("Load the panel plane first or reactivate its alignment.");
         const [a,b,c]=m, [x,y]=point;
@@ -349,6 +359,14 @@ const actions={
     "activate-align":async key=>{await rpc("/api/photos/"+state.chosen+"/active-alignment","PUT",{revision:capture().revision,alignment_id:key||null});await openPanel(state.panel.id,true);await currentMatrix();await alignOpen();msg("Active alignment updated");},
     "retain-dialog":()=>dialog("Retain inspection",form("retain",input("Record name","name",state.draft.title),"Keep observed result")),
     record:showRecord,
+    "recheck":()=>{const record=state.saved; const params=record?.facts?.parameters;
+        if(!record||!params) return;
+        const toolKey=record.kind, options={...(params.options||{})}, region=[...(params.region||[0,0,1,1])];
+        const captures=(params.captures||[]).filter(id=>state.photos.some(photo=>photo.id===id));
+        resetFrame();
+        state.tool=toolKey; state.options=options; state.region=region;
+        state.selection=captures.length?captures:(state.chosen?[state.chosen]:[]);
+        state.tab="inspect"; render(); msg("Retained settings loaded for re-check.");},
     "source-audit":async()=>{const report=await rpc("/api/inspections/"+state.saved.id+"/source-audit");
         dialog("Retained and current source settings",'<p class="quiet">'+text(report.notes)+'</p>'+detail(report)+
           '<div class="row">'+report.sources.filter(source=>!source.missing).map(source=>a("Original · "+source.title,source.original_url)).join("")+'</div>');},

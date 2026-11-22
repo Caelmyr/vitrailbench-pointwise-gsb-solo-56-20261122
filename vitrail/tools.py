@@ -14,6 +14,7 @@ from .shape_checks import boundary_intensity, seed_inclusions, support_distance
 from .sheets import aligned_asset, comparison_card
 from .traces import line_impression, strip_pair
 from .surface import crack_candidates, edge_roughness, glare, texture
+from .streaks import streak_orientations
 from .survey import grid_loss, survey_measure
 from .contracts import Problem
 
@@ -39,6 +40,7 @@ class Tool:
     fields: tuple
     run: object
     explanation: str
+    needs_sources: bool = False
 
     def public(self):
         return dict(key=self.key,title=self.title,area=self.area,input_count=self.input_count,
@@ -55,6 +57,10 @@ def selection(name,title,value,choices):
 
 def drawn(name,title,value):
     return Field(name,title,"position",value)
+
+
+def pick(name,title,value=None):
+    return Field(name,title,"panel_position",value)
 
 
 LEAD=(
@@ -109,6 +115,16 @@ TOOLS=(
         number("wavelength_mm","Feature spacing (mm)",2.4),number("neighborhood_mm","Neighborhood (mm)",7.5),
         number("min_coherence","Minimum direction coherence",.36,.03)),texture,
          "Inspect texture contrast and direction in local neighborhoods."),
+    Tool("streaks","Two-scale streak orientation","Surface",1,(
+        number("coarse_mm","Coarse streak spacing (mm)",3.2),
+        number("fine_mm","Fine streak spacing (mm)",.9),
+        number("neighborhood_mm","Sampling neighborhood (mm)",9),
+        number("min_coherence","Minimum direction coherence",.34,.03),
+        number("agreement_deg","Direction agreement (deg)",24,1),
+        pick("probe","Review point on the result")),streak_orientations,
+         "Read coarse and fine streak directions as separate bands; conflicts keep both directions and "
+         "inseparable spots are flagged, never averaged. Mark a review point to see the exact source patch.",
+         needs_sources=True),
     Tool("cracks","Crack candidate tracing","Surface",1,(
         number("radius_mm","Background radius (mm)",1.4),number("amplitude","Signal change",.052,.004),
         number("min_length_mm","Minimum run (mm)",5),
